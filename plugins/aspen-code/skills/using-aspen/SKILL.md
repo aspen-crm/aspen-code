@@ -44,6 +44,15 @@ the layout and naming rules. Read it once per session. The short version:
 
 Anything written outside `metadata/custom/` is replaced by the next fetch or compile.
 
+## Where the reference lives
+
+The **Aspen docs** are the reference for every component type's attributes, and the plugin ships
+them as the `aspen-docs` MCP server: `searchDocumentation` to find a page, `getPage` to read it
+(fallback: `https://aspencrm.gitbook.io/docs/llms.txt`, and any page URL + `.md`). Skills here
+carry the loop and what the docs do not say. When sources disagree: the CLI and compiler first,
+then real components in `metadata/active/` and `platform/`, then the docs, then a skill — and say
+which one was wrong so it gets fixed.
+
 ## The loop
 
 | # | Moment | Skill |

@@ -27,6 +27,10 @@ at all.
   and the ordered checklist for a trigger that "isn't firing".
 - **Querying** from a trigger (`context.services().query()`): read `query-notes.md` first —
   `LIMIT` is mandatory, one line only, and `name_p` is not a universal display field.
+- The **Aspen SDK docs** (Record Triggers, Record/Query/Log/HTTP services) are the API reference —
+  ask `aspen-docs` first. They are audience-gated, so the MCP may not return them; the patterns and
+  notes here cover the gotchas the docs leave out either way (the changed-fields-only batch,
+  mandatory `LIMIT`, `.failures()` on writes, the toolchain pin).
 - The `aspen-crm` crate source is the truth for types and methods; after the first build it is at
   `~/.cargo/registry/src/*/aspen-crm-*/src/`. Grep it rather than docs.rs.
 

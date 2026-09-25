@@ -7,9 +7,8 @@ description: Use when authoring or changing Aspen metadata in metadata/custom/ �
 
 You write JSON into `metadata/custom/`, one file per component; `aspen compile --metadata`
 validates it offline with the instance's own validator and writes the resolved result to
-`metadata/compiled/`. The instance directory's `AGENTS.md` is the authority on paths, naming and
-required keys — **read it first**, every session. When a rule below disagrees with `AGENTS.md` or
-with the compiler, they win; tell the human this skill needs fixing.
+`metadata/compiled/`. The instance directory's `AGENTS.md` is the authority on paths and naming, and
+the Aspen docs (below) on each component type's attributes — read them, don't recall them.
 
 ## The loop
 
@@ -54,73 +53,48 @@ with the compiler, they win; tell the human this skill needs fixing.
 4. **Read the result back** in `metadata/compiled/` — it is your source with the platform merged
    in. Then hand off to `build-and-deploy`.
 
-## Naming (the validator enforces these; `AGENTS.md` has the full list)
+## Reference: the Aspen docs, not this skill
 
-- Every dot-separated segment ends `_c` (yours) or `_p` (platform), starts with a letter, is
-  lowercase letters/digits/underscores, and has 2–24 characters before the suffix.
-- **No underscore in the last two characters before the suffix:** `tier_1_c` fails, `tier_one_c`
-  passes. Numbered picklist items are the usual casualty.
-- A subcomponent is `<parent>.<segment>`: `renewal_c.layout_c`, `renewal_c.status_c`. The
-  component's own segment ends `_c` too — `renewal_c.layout_p` is rejected as not custom.
-- Fields live inside their object's file under `fields`. There is no `field_p` directory.
-- An object-specific picklist is `<object>.<field>` in `object_p/picklist_p/`; a shared one lives in
-  the top-level `picklist_p/`.
+Attribute lists, types and examples for every component type live in the Aspen documentation,
+reachable through the plugin's **`aspen-docs`** MCP server (`searchDocumentation`, then `getPage`
+on the URL it returns). Read the page for the ctype you are writing before authoring it:
 
-## Field types — copy from a real object, these are the common pairs
+| For | Page |
+|---|---|
+| Naming, namespaces, the common attributes | `https://aspencrm.gitbook.io/docs/platform/introduction/components-overview` |
+| Where a file goes, `name` vs `extends`, overlays | `…/platform/introduction/managing-component-files` |
+| Field types, subtypes and their attributes (lookups, polyids, currency, picklists) | `…/platform/component-types/field` |
+| Object, object type, picklist, layout, list view, tab, tab collection, lifecycle, … | `…/platform/component-types/<type>` (e.g. `list-view`, `tab-collection`) |
 
-| kind | `type` / `subtype` | notes |
-|---|---|---|
-| text | `text` / `text` | `max-length` |
-| long text | `text` / `long` | cannot be `indexed` |
-| number | `number` / `number` or `percentage` | `min-value` **and** `max-value`, both as **strings** (`"0"`) |
-| currency | `currency` / `currency` | |
-| date / datetime | `date` / `date`, `datetime` / `datetime` | |
-| checkbox | `checkbox` / `checkbox` | two values is a checkbox, not a picklist |
-| picklist | `picklist` / `picklist` | `picklist: "<object>.<field>"` |
-| lookup | `id` / `lookup` | `relationship: "<object>"` |
-| owning parent | `id` / `parent` | `relationship`, usually `deletion-strategy: cascade` |
-| polymorphic | `polyid` / `lookup` | `allowed-objects` — plus two companion fields, below |
+If the MCP is unavailable, fetch the same page with `.md` appended, or the index at
+`https://aspencrm.gitbook.io/docs/llms.txt`. **Precedence:** the compiler's verdict, then real
+components in `active/`/`platform/`, then the docs, then this skill.
 
-- `deletion-strategy`: `cascade`, `block`, or `set_to_null` (default). An `id` field cannot be
-  `required` under `set_to_null`.
-- **A polyid needs its companions authored by you:** for `owner_c` with
-  `related-object-field: "owneron_c"` and `related-display-field: "ownerdn_c"`, add `owneron_c` as
-  `picklist`/`object_ref` with `polymorphic-field: "owner_c"`, and `ownerdn_c` as plain `text`.
-- `indexed` is valid on text, picklist, date, datetime, number, currency and uuid — not on `id`,
-  `polyid`, `checkbox` or long text.
-- `searchable: true` needs a search config to go with it; default to `false`.
-- Never author platform-derived fields (`id_p`, audit fields) — the instance adds them.
-- A new field on an object with record types must also appear in each `object_type_p`, or typed
-  records reject it.
-
-## Making an object usable
-
-An object is not reachable until it has a `layout_p`, a `list_view_p`, and a `tab_p` placed in a
-`tab_collection_p`. After creating one, check all four exist.
-
-- **Layout:** needs `object`; sections carry `columns` (`one_column` | `two_column_flow`) and
-  `fields` as objects `{"name": ..., "field": ...}` — plain strings are rejected. Fields by raw
-  name (`amount_p`), never an alias.
-- **List view:** needs `tab` (the full tab name); columns `{name, field}`; sort entries
-  `{name, column, direction}`; the filter is `query-filter`, an XQL string. There are no relative
-  dates — "next quarter" is a static range someone must edit; say so.
-- **Tab:** `{"tab-type", "object", "default-list-view": "<full list view name>", "label", "active"}`.
-  A tab surfaces only its default list view; a second view on the same tab is unreachable.
-- **Tab collection:** author your own `tab_collection_p` (e.g. `sales_ops_c`) listing the platform
-  tabs you want beside yours. If you instead `extends` an existing collection, its `tabs` list
-  **replaces** the custom children — include every existing custom tab (read them from `active/`)
-  or the check-in fails with "Child components must not be dropped".
-
-## Rules
+## What the docs do not say — learned from real check-ins
 
 - **Nothing deletes.** Retire a component, field, column or tab with `"active": false` and keep
   the file. Dropping a child entry or deleting a deployed file fails check-in ("Child components
   cannot be dropped"). Reordering is fine.
-- **Deploy a platform overlay as its own package**, apart from your custom work, so one rejection
-  cannot take the rest with it. Some platform components refuse any overlay (observed on 26.3.3:
-  a base object type, a platform picklist such as `task_p.priority_p`, the stock `aspen_crm_p` tab
-  collection) — `aspen compile` will say so; don't fight it, author a custom one.
+- **An object is not reachable until it has a layout, a list view, and a tab placed in a tab
+  collection.** After creating one, check all four exist.
+- **Extending a tab collection replaces its custom children.** Its `tabs` list must include every
+  existing custom tab (read them from `active/`), or check-in fails with "Child components must
+  not be dropped". Usually simpler: author your own `tab_collection_p` listing the platform tabs you
+  want beside yours.
+- **A tab surfaces only its `default-list-view`**; a second list view on the same tab is
+  unreachable.
+- **List-view filters have no relative dates** — "next quarter" is a static range someone must
+  edit. Say so.
+- **`number` bounds are decimal strings** (`"min-value": "0"`); a bare integer fails "expected a
+  Decimal type". Copy the form real components use.
+- **A new field on an object with record types** must also appear in each `object_type_p`, or
+  typed records reject it.
+- **`searchable: true` needs a search config** to go with it; default to `false`.
+- **Some platform components refuse any overlay** (observed on 26.3.3: a base object type, a
+  platform picklist such as `task_p.priority_p`, the stock `aspen_crm_p` tab collection). The
+  compiler says so — author a custom one instead. Deploy any platform overlay as **its own
+  package**, so one rejection cannot take your custom work with it.
 - A value derived from other fields is a stored field maintained by a trigger, and a status flow
-  is a `lifecycle_p` — see `model-first` before reaching for anything else.
+  is a `lifecycle_p` — see `model-first`.
 - For a set of related objects, fan out to `schema-explorer` to map what exists, and to
   `metadata-reviewer` to audit the diff before deploy.

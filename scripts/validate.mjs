@@ -70,6 +70,14 @@ export function validatePlugin (root) {
     }
   }
 
+  // Both hosts reach the same MCP servers: .mcp.json for Claude Code, the manifest for Codex.
+  const mcp = existsSync(join(root, '.mcp.json')) ? json(join(root, '.mcp.json')).mcpServers : {}
+  const codexMcp = codex.mcpServers ?? {}
+  assert.deepEqual(Object.keys(codexMcp).sort(), Object.keys(mcp).sort(), 'MCP servers differ between hosts')
+  for (const [name, server] of Object.entries(mcp)) {
+    assert.equal(codexMcp[name].url, server.url, `${name}: URL differs between hosts`)
+  }
+
   const agentsDir = join(root, 'agents')
   const agents = existsSync(agentsDir) ? readdirSync(agentsDir).filter(f => f.endsWith('.md')) : []
   for (const file of agents) {

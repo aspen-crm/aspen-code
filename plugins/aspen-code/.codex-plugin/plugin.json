@@ -1,11 +1,17 @@
 {
   "name": "aspen-code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": {
     "name": "Aspen CRM"
   },
   "repository": "https://github.com/aspen-crm/aspen-code",
-  "keywords": ["aspen", "veeva", "crm", "metadata", "rust"],
+  "keywords": [
+    "aspen",
+    "veeva",
+    "crm",
+    "metadata",
+    "rust"
+  ],
   "description": "Build on an Aspen instance with the aspen CLI: install it, sign in with OAuth, author metadata and Rust triggers, validate offline, deploy through the check-in chain, and verify.",
   "skills": "./skills/",
   "interface": {
@@ -14,7 +20,17 @@
     "longDescription": "Build on an Aspen instance with the aspen CLI: install it, sign in with OAuth, author metadata and Rust triggers, validate offline, deploy through the check-in chain, and verify.",
     "developerName": "Aspen CRM",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
-    "defaultPrompt": ["Set me up to build on my Aspen instance"]
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set me up to build on my Aspen instance"
+    ]
+  },
+  "mcpServers": {
+    "aspen-docs": {
+      "url": "https://aspencrm.gitbook.io/docs/~gitbook/mcp"
+    }
   }
 }

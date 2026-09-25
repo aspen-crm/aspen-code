@@ -37,6 +37,11 @@ The Claude Code and Codex plugin for building on an Aspen instance with the **as
 
 Agents: `schema-explorer` and `metadata-reviewer`, both read-only.
 
+**Docs:** the plugin connects the [Aspen documentation](https://aspencrm.gitbook.io/docs) as the
+`aspen-docs` MCP server (GitBook's public endpoint, no sign-in). The component-type reference lives
+there, not in the skills; the skills keep the loop and what the docs leave out. Only the public
+sections are reachable — the audience-gated ones (Customization: CLI, Aspen SDK, Custom UI) are not.
+
 Not in 0.0.1: TypeScript UI authoring guidance, and the guard hooks from 2.8.x.
 
 ## Install (testers)
