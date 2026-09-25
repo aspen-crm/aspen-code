@@ -1,0 +1,14 @@
+{
+  "name": "aspen-code",
+  "description": "Aspen Code for internal testing: build on an Aspen instance with the aspenup CLI.",
+  "owner": {
+    "name": "Aspen CRM"
+  },
+  "plugins": [
+    {
+      "name": "aspen-code",
+      "source": "./plugins/aspen-code",
+      "description": "Install the aspen CLI, sign in with OAuth, then author metadata and Rust triggers, compile, deploy and verify."
+    }
+  ]
+}
