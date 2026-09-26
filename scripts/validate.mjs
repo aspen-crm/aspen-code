@@ -53,7 +53,9 @@ export function validatePlugin (root) {
     for (const file of readdirSync(dir)) {
       if (!/\.(md|rs)$/.test(file)) continue
       const body = readFileSync(join(dir, file), 'utf8')
-      for (const [re, why] of RETIRED) assert.ok(!re.test(body), `${skill}/${file}: teaches the retired ${why}`)
+      // The router's corrections table names the retired forms on purpose, to overrule the docs.
+      const taught = body.replace(/^### Where the docs are wrong[\s\S]*?(?=^## )/m, '')
+      for (const [re, why] of RETIRED) assert.ok(!re.test(taught), `${skill}/${file}: teaches the retired ${why}`)
       for (const [, target] of body.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
         if (/^[a-z]+:/.test(target)) continue
         assert.ok(existsSync(join(dir, target)), `${skill}/${file}: broken link ${target}`)

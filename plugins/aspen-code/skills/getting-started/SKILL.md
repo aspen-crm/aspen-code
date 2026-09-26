@@ -68,18 +68,15 @@ instance and holds no secret. Read only that field.
 
 ## 3. Create the instance directory — `aspen init`
 
-`aspen init` needs the login. It creates `<domain>_<instance>/` under the working directory (or
-`--dir`), scaffolds `metadata/`, `rust/`, `typescript/`, `data/`, an `AGENTS.md` and a
-`.gitignore`, and fetches `metadata/platform/` and `metadata/active/` from the instance.
+What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matters here:
 
-- **Ask where it should go** (e.g. `~/Aspen`) before running it. It refuses a non-empty directory
-  that is not already an instance directory, and it never overwrites a file.
-- Run from **inside** an existing instance directory it completes that one — the safe way to
-  restore a missing scaffold file or refresh the fetched layers.
-- Afterwards, the session should work **in** that directory: tell the user to reopen the host
-  there (or `cd` for your commands, and say you did).
-- Suggest `git init` and a first commit: `metadata/custom/`, `rust/` and `typescript/` are the
-  source; the `.gitignore` already excludes the fetched and compiled layers.
+- It needs the login, and it names the directory after the instance. **Ask where it should go**
+  (e.g. `~/Aspen`), then `aspen init --dir <there>`.
+- It refuses a non-empty directory that is not already an instance directory, and never
+  overwrites a file. Run again from **inside** an instance directory, it completes a fresh clone or
+  refreshes the fetched `platform/` and `active/` layers.
+- Afterwards the session should work **in** that directory: tell the user to reopen the host there
+  (or `cd` for your commands, and say you did). Suggest `git init` and a first commit.
 
 **Check:** `.aspen/config.toml` names the instance you signed in to.
 

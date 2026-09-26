@@ -12,69 +12,42 @@ at all.
 
 ## 0. Orient — before writing a line
 
-- **Read the crate `aspen init` scaffolded:** `rust/aspen.server.json`, `rust/src/lib.rs`,
-  `rust/Cargo.toml`. Add to it; never create a second crate, and never rename it — the CLI
-  deploys it as `server_main_c` whatever it is called (`rust-trigger-notes.md` says why).
-- **Read the object you are triggering** for exact field names and types:
-  `metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or
-  `metadata/platform/` / `metadata/active/`. The variant you match on depends on the field's
-  `type`/`subtype`, not on what you would guess.
-- **Start from `trigger-patterns.rs`** beside this file — six handlers that fired on a real
-  instance, plus the helper block they share. It builds unchanged against the scaffolded crate
-  (with `jiff = "0.2"` added). Copy the helpers and the one handler closest to yours.
-- **Read `rust-trigger-notes.md`** when no pattern covers your case: the `RecordFieldValue`
-  variant per field type, the changed-fields-only update batch, inserting and updating records,
-  and the ordered checklist for a trigger that "isn't firing".
-- **Querying** from a trigger (`context.services().query()`): read `query-notes.md` first —
-  `LIMIT` is mandatory, one line only, and `name_p` is not a universal display field.
-- The **Aspen SDK docs** (Record Triggers, Record/Query/Log/HTTP services) are the API reference —
-  ask `aspen-docs` first. They are audience-gated, so the MCP may not return them; the patterns and
-  notes here cover the gotchas the docs leave out either way (the changed-fields-only batch,
-  mandatory `LIMIT`, `.failures()` on writes, the toolchain pin).
-- The `aspen-crm` crate source is the truth for types and methods; after the first build it is at
-  `~/.cargo/registry/src/*/aspen-crm-*/src/`. Grep it rather than docs.rs.
+- **The reference is the Aspen SDK docs** — ask `aspen-docs`: *Project Configuration*
+  (`aspen.server.json`, `entrypoints!`), *Record Triggers* (events, contexts, `FieldState`, field
+  and record errors, update deltas), *Web API*, and the *Record*, *Query*, *Log*, *HTTP* and
+  *Runtime Context* services. Read the page for what you are about to use.
+- **Read the crate `aspen init` scaffolded** (`rust/aspen.server.json`, `rust/src/lib.rs`,
+  `rust/Cargo.toml`) and add to it. Never create a second crate or rename this one — the CLI
+  deploys it as `server_main_c` whatever it is called.
+- **Read the object you are triggering** for exact field names and each field's `type`/`subtype`
+  (`metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or `active/` /
+  `platform/`). The `RecordFieldValue` variant you read or write follows the field's metadata, not
+  what you would guess.
+- **Start from `trigger-patterns.rs`** beside this file: six handlers that fired on a real
+  instance, plus the helpers they share. It builds unchanged against the scaffolded crate (with
+  `jiff = "0.2"` added). Copy the helpers and the one handler closest to yours.
+- **Read `rust-trigger-notes.md`** for what the docs leave out: the toolchain pin and lockfile, the
+  variant per field type (polyids and their discriminators), `.failures()` on writes, date
+  arithmetic, and the ordered checklist for a trigger that "isn't firing".
+- **Querying?** `query-notes.md` first — one line only, at most 100 rows back, `CURRENT_USER()`
+  and `LIKE` limits. Never interpolate request-supplied text into a statement.
+- The `aspen-crm` crate source is the final word on types: after the first build it is at
+  `~/.cargo/registry/src/*/aspen-crm-*/src/`.
 
-## 1. Declare — `rust/aspen.server.json`
+## 1. Rules the docs do not state
 
-```json
-{
-  "record-triggers": [
-    { "name": "renewal_guard_c", "object": "renewal_c", "events": ["before_insert", "before_update"] }
-  ],
-  "web-apis": [
-    { "name": "hello_c", "methods": ["GET"], "path": "/hello", "interface": "simple" }
-  ]
-}
-```
+- `object` and `events` in `aspen.server.json` are not checked against metadata — a typo compiles,
+  deploys, and never runs.
+- **On `before_update` / `after_update` the batch holds only changed fields.** Read anything else
+  with a query on `id_p` (which `record.get("id_p")` always returns).
+- **Batch your work:** collect across the whole batch, then at most one insert and one update per
+  object. N records is one round trip, not N.
+- **A trigger that writes back to its own object needs a write-only-on-change guard**, or it
+  re-fires itself.
+- To show the user a message, reject from a before-trigger (a field or record error, or `Err`).
+  That is the only output you can confirm; log lines are not readable from the CLI.
 
-Keep the scaffold's `hello_c` web API or remove it deliberately — it is a working example of the
-second entry kind. Events are exactly `before_insert | after_insert | before_update |
-after_update | before_delete | after_delete`. `entrypoints!` generates one trait named **exactly**
-the entry's `name`, with one method per event (or HTTP method). Neither `object` nor `events` is
-checked against metadata at compile time — a typo compiles and never runs.
-
-## 2. Implement
-
-```rust
-impl renewal_guard_c for Entrypoints {
-    fn before_insert(context: &BeforeInsertContext) -> error::Result<()> {
-        for record in context.batch().iter() { /* validate or set fields */ }
-        Ok(())
-    }
-}
-```
-
-- `record.get(field)?` → `FieldState::Value(..) | Null | Absent`. **On `before_update` the batch
-  carries only changed fields**: `Absent` means "not in this write — read the stored value",
-  `Null` means "cleared".
-- Reject a save with `error::bail!("…")` from a before-trigger (or a field error on the record) —
-  it surfaces to the user at the save and rejects the write. That is also the only confirmed way to
-  see a message from a trigger; `info!`/`warn!` output has no confirmed reader.
-- Batch your work: collect across the whole batch, then at most one insert and one update per
-  object — N records is one round trip, not N.
-- Build query statements from `Uuid`s and constants only — never interpolate request text.
-
-## 3. Build
+## 2. Build
 
 ```sh
 aspen compile --rust        # cargo build --release --locked for wasm32-wasip2
@@ -84,13 +57,13 @@ cd rust && cargo test       # unit tests run as wasm through the CLI's runner
 A new dependency needs a lockfile update first (`--locked`): `cd rust && cargo update -p <crate>`.
 A componentization error naming wit-bindgen is the toolchain pin, not a dependency — see the notes.
 
-## 4. Deploy and prove it
+## 3. Deploy and prove it
 
 Hand off to `build-and-deploy`. A trigger is done when a record written through a real path shows
 the behavior — the derived field set, the save rejected with your message — not when it compiles.
 
 ## Definition of done
 
-Field names read from metadata · declared for the right object and events · `aspen compile`
-clean · deployed · proven with a record round-trip. Then summarize what the rule does, the message
-it rejects with, and the edge cases it skips (e.g. an empty optional field).
+Field names and types read from metadata · declared for the right object and events · `aspen
+compile` clean · deployed · proven with a record round-trip. Then summarize what the rule does,
+the message it rejects with, and the edge cases it skips (e.g. an empty optional field).
