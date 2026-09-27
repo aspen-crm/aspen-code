@@ -10,6 +10,11 @@
 //   3. Is the session in an instance      `.aspen/config.toml`, which `aspen init` writes,
 //      directory, and for which instance? in the working directory or one above it.
 //
+// A found CLI is not a current CLI: whenever it is found and the note speaks, it asks for
+// `aspenup self update` (the launcher, a no-op when already the promoted release) and, in an
+// instance directory, `aspenup update` (the toolchain that instance serves). The hook itself
+// stays offline, so it cannot tell whether an update exists -- the commands answer that.
+//
 // Missing CLI or missing login: say so, and route to `getting-started`, in every session --
 // that is the onboarding prompt. Logged in to a different instance than the directory's: say
 // so, because every `aspen move` would refuse. In an instance directory: route to `using-aspen`.
@@ -100,6 +105,11 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
     lines.push(`The Aspen CLI is installed at \`${cli.path}\` but this session's PATH does not have it yet. Run it by that full path until the user restarts the terminal/host.`)
   }
 
+  const aspenup = join(dirname(cli.path), isWindows ? 'aspenup.exe' : 'aspenup')
+  const update = (inInstance) => inInstance
+    ? `Before the first Aspen command this session, bring the CLI up to date: \`${aspenup} self update\` (the launcher; a no-op when current), then \`${aspenup} update\` here (installs the aspen toolchain this instance serves). Ask first; say what changed.`
+    : `Before the first Aspen command this session, bring the CLI up to date: \`${aspenup} self update\` (a no-op when already current). Ask first; say what changed.`
+
   const instance = loggedInInstance(credentialsPath(env, home))
   const here = instanceDir(cwd)
   if (!instance) {
@@ -109,12 +119,14 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
       'The login opens a browser and needs a real terminal, so the user runs it, not you: `aspen login -i <instance URL>`.'
     )
     if (here?.instance) lines.push(`This directory belongs to \`${here.instance}\` — that is the URL to sign in to.`)
+    lines.push(update(false))
     return lines.join('\n')
   }
 
   if (!here) return lines.join('\n')
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
+  lines.push(update(true))
   if (here.instance && !sameInstance(here.instance, instance)) {
     lines.push(
       `The CLI is signed in to \`${instance}\`, but this directory belongs to \`${here.instance}\`, so every \`aspen move\` here will refuse.`,

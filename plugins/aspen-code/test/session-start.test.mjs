@@ -62,6 +62,19 @@ test('not signed in, inside an instance directory: names the URL to sign in to',
   assert.ok(out.includes(URL_A))
 })
 
+test('a found CLI is always asked to update: launcher, and in an instance the served toolchain', t => {
+  const notSignedIn = context(machine(t, { cli: true, onPath: true }))
+  assert.match(notSignedIn, /aspenup self update/)
+  assert.doesNotMatch(notSignedIn, /aspenup update/)
+  const inInstance = context(machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A }))
+  assert.match(inInstance, /aspenup self update/)
+  assert.match(inInstance, /aspenup update. here/)
+})
+
+test('no CLI: no update line, the installer instead', t => {
+  assert.doesNotMatch(context(machine(t)), /self update/)
+})
+
 test('signed in, outside any instance directory: silent', t => {
   assert.equal(context(machine(t, { cli: true, onPath: true, login: URL_A })), '')
 })

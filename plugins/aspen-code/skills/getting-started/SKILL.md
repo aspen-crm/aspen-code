@@ -8,7 +8,22 @@ description: Use when the aspen CLI is not installed, not signed in, signed in t
 Four steps, each ending in a check you run. Do them in order and stop at the first one that is
 already done — the session-start note usually says which.
 
-## 1. Install the CLI — with consent
+## 1. Install or update the CLI — with consent
+
+**Already installed? Update it, don't skip it** — a found CLI is often behind the promoted release:
+
+```sh
+aspenup self update     # the launcher → the promoted release; prints "already the promoted release" when current
+aspenup update          # in an instance directory: the aspen toolchain that instance serves
+```
+
+The launcher and the toolchain are separate. `self update` never changes which `aspen` runs; in
+an instance directory the proxy runs the toolchain that instance serves, and `aspenup update`
+refreshes that answer. Don't install a newer toolchain than the instance serves — that is the
+mismatch `aspen doctor` reports as `instance.cli-matches-instance`. Say what changed (the versions
+before and after), then go to step 2.
+
+Not installed:
 
 The CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and later fetches the
 toolchain each instance serves. Tell the user what it does (downloads from
