@@ -44,7 +44,12 @@ the whole site — Platform, Customization (CLI, Aspen SDK, Custom UI), API and 
 Customization and API are sign-in-only, the public endpoint cannot return them; they become
 reachable when those sections are published.
 
-Not in 0.0.1: TypeScript UI authoring guidance, and the guard hooks from 2.8.x.
+**Guard:** before any `aspen` command runs, a hook checks it is aspenup's CLI (not a Builder-era
+folder-local one), run from an instance directory, whose instance matches both the session's
+folder and the login. It refuses a deploy verb outside an instance folder or against a
+mismatched login, and asks before a command leaves the session's folder.
+
+Not in 0.0.1: TypeScript UI authoring guidance, and the other guard hooks from 2.8.x.
 
 ## Install (testers)
 

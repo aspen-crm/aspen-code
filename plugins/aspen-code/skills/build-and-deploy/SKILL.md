@@ -25,6 +25,10 @@ keeps its old code — a deploy that looks fine and changed nothing.
 
 ## 2. Pre-flight
 
+- **The folder and the instance.** You are in the instance directory the user means, its
+  `.aspen/config.toml` names the instance they want this deployed to, and the CLI is signed in to
+  that instance (`configuration.record-matches-login` below). Say which instance you are about to
+  deploy to when you ask for the go-ahead.
 - `aspen doctor` — no `problem`; in particular `instance.cli-matches-instance`,
   `configuration.record-matches-login` and `instance.no-package-in-flight` are `ok`.
 - `aspen status` — no check-in already in flight (someone else's, possibly). If one is, **wait and

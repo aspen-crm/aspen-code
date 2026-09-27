@@ -80,6 +80,12 @@ copy the shape, change it, compile.
 
 - **The CLI is the authority on its own verbs.** When a skill and `aspen <command> --help`
   disagree, `--help` wins — and the skill is wrong; tell the human so it gets fixed in this plugin.
+- **Right binary, right folder, right instance — every `aspen` command.** Run it from the
+  session's instance directory (or pass that directory with `--dir`), and only after
+  `.aspen/config.toml` there names the instance the user means *and* the one the CLI is signed
+  in to. If the shell's `aspen` is a folder-local Builder-era CLI, run `~/.aspen/bin/aspen` by
+  its full path. Never point a command at another instance's folder without the user asking. A
+  guard hook enforces this (Claude Code asks or refuses; Codex refuses and says how to confirm).
 - **Never handle credentials.** `aspen login` is OAuth in a browser and refuses to run from an
   agent. The user runs it. You never see, type, ask for, or print a token or API key.
 - **`aspen compile` before every deploy.** It runs the instance's own validator offline and
@@ -96,6 +102,7 @@ copy the shape, change it, compile.
 
 | Thought | Reality |
 |---|---|
+| "I'll `cd` to the other instance folder and deploy there too" | A different instance. Only when the user asked for that folder — the guard will ask. |
 | "I'll run `aspen login` for them" | It refuses under an agent. Hand the command to the user. |
 | "I'll edit `metadata/compiled/` / `active/`" | Replaced on the next compile/fetch. Author in `metadata/custom/`. |
 | "I'll guess the attribute name" | Copy a real component from `metadata/compiled/` or `platform/`. |
