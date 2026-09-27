@@ -63,6 +63,11 @@ export function validatePlugin (root) {
     }
   }
 
+  // A trigger's failure behavior is the developer's decision; the step that asks for it stays.
+  const serverCode = readFileSync(join(root, 'skills/server-code/SKILL.md'), 'utf8')
+  assert.match(serverCode, /Ask the developer how it fails/, 'server-code: the ask-before-writing error step is missing')
+  assert.ok(serverCode.includes('error-handling.md'), 'server-code: must route to error-handling.md')
+
   const hooks = join(root, 'hooks/hooks.json')
   if (existsSync(hooks)) {
     for (const groups of Object.values(json(hooks).hooks)) for (const group of groups) for (const hook of group.hooks) {

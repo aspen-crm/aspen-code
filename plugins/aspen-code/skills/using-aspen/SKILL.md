@@ -101,5 +101,6 @@ copy the shape, change it, compile.
 | "I'll guess the attribute name" | Copy a real component from `metadata/compiled/` or `platform/`. |
 | "It compiled, so it works" | Deploy, then a record round-trip. |
 | "The check-in is stuck; I'll clear it" | Shared state. Ask first — `build-and-deploy`. |
+| "I'll just `bail!` if the rule fails" | Ask the developer how each failure should reach the UI and the API first — `server-code` step 1. |
 | "I'll name the crate `server_main_c`" | Don't rename anything. The CLI deploys the `rust/` crate as `server_main_c` itself. |
 | "A deal object" | `opportunity_p` exists. `lean-data-model`. |
