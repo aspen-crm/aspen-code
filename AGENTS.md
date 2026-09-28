@@ -20,6 +20,9 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
   reach the network), never read a secret, and exit 0 with no output on any error. There are two:
   `session-start.mjs` (readiness note) and `guard-instance.mjs` (right binary, folder and
   instance for every `aspen` command). Anything else the plugin enforces lives in skill prose.
+- **Installing is consented, planned and idempotent.** `install-deps.mjs` prints its plan by
+  default, installs project dependencies only with `--run` and machine-wide tools only with
+  `--machine`, and skips anything already satisfied. Keep new install steps to that shape.
 - **Bump the version in both manifests** on every shipped change.
 
 ## Verify before "done"

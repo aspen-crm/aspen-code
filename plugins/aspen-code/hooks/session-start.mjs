@@ -24,7 +24,7 @@
 // network to resolve a toolchain) and never validates the token -- `aspen doctor` does that,
 // and the skills run it. Fails quiet: a crash here must be quieter than the value it adds.
 
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -103,6 +103,35 @@ export function builderFolder (cwd) {
   }
 }
 
+// What this instance directory still needs installed before it builds — read from disk only:
+// the npm SDK under typescript/node_modules, cargo, the Rust toolchain rust-toolchain.toml pins (in
+// RUSTUP_HOME), and Node on PATH. `aspen init` installs none of them.
+export function missingDependencies (dir, env = process.env, home = homedir()) {
+  const missing = []
+  const onPath = (name) => (env.PATH || env.Path || '').split(delimiter).filter(Boolean)
+    .some((d) => [name, `${name}.exe`, `${name}.cmd`].some((n) => isFile(join(d, n))))
+  const rust = join(dir, 'rust')
+  if (isDir(rust)) {
+    const cargoHome = nonBlank(env.CARGO_HOME) || join(home, '.cargo')
+    if (!onPath('cargo') && !['cargo', 'cargo.exe'].some((n) => isFile(join(cargoHome, 'bin', n)))) {
+      missing.push('Rust (rustup)')
+    } else {
+      let channel = null
+      try { channel = /^\s*channel\s*=\s*"([^"]+)"/m.exec(readFileSync(join(rust, 'rust-toolchain.toml'), 'utf8'))?.[1] ?? null } catch {}
+      const toolchains = join(nonBlank(env.RUSTUP_HOME) || join(home, '.rustup'), 'toolchains')
+      let names = []
+      try { names = readdirSync(toolchains) } catch {}
+      if (channel && !names.some((n) => n === channel || n.startsWith(`${channel}-`))) missing.push(`Rust ${channel} (pinned by rust/rust-toolchain.toml)`)
+    }
+  }
+  const ts = join(dir, 'typescript')
+  if (isFile(join(ts, 'package.json'))) {
+    if (!onPath('node')) missing.push('Node')
+    if (!isDir(join(ts, 'node_modules', '@aspen-crm', 'sdk'))) missing.push("typescript/'s npm packages")
+  }
+  return missing
+}
+
 // Instance URLs compare without a trailing slash; the CLI normalizes to one, a human rarely types it.
 const sameInstance = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase()
 
@@ -152,6 +181,10 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
   lines.push(update(true))
+  const deps = missingDependencies(here.dir, env, home)
+  if (deps.length) {
+    lines.push(`Build dependencies not installed yet: ${deps.join(', ')}. Offer to install them before any compile — \`getting-started\` step 4 (its \`install-deps.mjs\` shows the plan first).`)
+  }
   if (here.instance && !sameInstance(here.instance, instance)) {
     lines.push(
       `The CLI is signed in to \`${instance}\`, but this directory belongs to \`${here.instance}\`, so every \`aspen move\` here will refuse.`,

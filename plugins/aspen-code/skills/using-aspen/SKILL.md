@@ -18,6 +18,7 @@ Three facts, in this order. The session-start note states them when hooks are on
 | The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` §1 |
 | It is signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` §2 — the **user** runs `aspen login` |
 | You are in that instance's directory | a `.aspen/config.toml` here or above | `getting-started` §3 — `aspen init` |
+| Its build dependencies are installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` §4 — `install-deps.mjs` |
 
 Then run **`aspen doctor`** once in the instance directory. It is the CLI's own readiness report
 (JSON when an agent runs it, one `id` + `status` per check, exit 1 only on a `problem`). Fix every

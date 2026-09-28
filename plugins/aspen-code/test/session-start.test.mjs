@@ -103,6 +103,26 @@ test('a Builder-era folder is named as such, not treated as an instance director
   assert.doesNotMatch(out, /using-aspen/)
 })
 
+test('an instance directory with no build dependencies says what is missing', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  const dir = join(m.home, 'Aspen', 'acme_dev')
+  mkdirSync(join(dir, 'rust'), { recursive: true })
+  writeFileSync(join(dir, 'rust', 'rust-toolchain.toml'), '[toolchain]\nchannel = "1.98.1"\n')
+  mkdirSync(join(dir, 'typescript'), { recursive: true })
+  writeFileSync(join(dir, 'typescript', 'package.json'), '{}')
+  let out = context(m)
+  assert.match(out, /Build dependencies not installed yet: Rust \(rustup\), Node, typescript\/'s npm packages/)
+  assert.match(out, /install-deps\.mjs/)
+  // cargo present, pinned toolchain absent; then everything present: silent about dependencies.
+  mkdirSync(join(m.home, '.cargo', 'bin'), { recursive: true }); writeFileSync(join(m.home, '.cargo', 'bin', 'cargo'), '')
+  assert.match(context(m), /Rust 1\.98\.1 \(pinned/)
+  mkdirSync(join(m.home, '.rustup', 'toolchains', '1.98.1-aarch64-apple-darwin'), { recursive: true })
+  mkdirSync(join(dir, 'typescript', 'node_modules', '@aspen-crm', 'sdk'), { recursive: true })
+  const bin = join(m.home, 'nodebin'); mkdirSync(bin); writeFileSync(join(bin, 'node'), '')
+  out = context({ ...m, env: { ...m.env, PATH: `${m.env.PATH}:${bin}` } })
+  assert.doesNotMatch(out, /Build dependencies/)
+})
+
 test('ASPEN_CONFIG_DIR overrides where credentials are read', t => {
   const m = machine(t, { cli: true, onPath: true })
   const dir = join(m.home, 'elsewhere')
