@@ -25,6 +25,10 @@ keeps its old code — a deploy that looks fine and changed nothing.
 
 ## 2. Pre-flight
 
+- **The folder and the instance.** You are in the instance directory the user means, its
+  `.aspen/config.toml` names the instance they want this deployed to, and the CLI is signed in to
+  that instance (`configuration.record-matches-login` below). Say which instance you are about to
+  deploy to when you ask for the go-ahead.
 - `aspen doctor` — no `problem`; in particular `instance.cli-matches-instance`,
   `configuration.record-matches-login` and `instance.no-package-in-flight` are `ok`.
 - `aspen status` — no check-in already in flight (someone else's, possibly). If one is, **wait and
@@ -39,22 +43,20 @@ keeps its old code — a deploy that looks fine and changed nothing.
 ## 3. The check-in chain — ordered, each phase mandatory
 
 ```sh
-aspen move save-package        # zips metadata/custom + the built rust/ and typescript/ output
-aspen move checkin-prep        # the instance's full validation
-aspen move checkin-index       # index creation the package needs
-aspen move checkin-deploy      # makes it live
+aspen move save-package        # metadata/custom + the built rust/ and typescript/ output
+aspen move checkin-prep        # pre-release: the instance's full validation
+aspen move checkin-index       # the indexes the package needs
+aspen move checkin-deploy      # release: makes it live
 ```
 
-- `save-package` packages the instance directory it runs in: only `metadata/custom/` from
-  metadata, the crate as `server_main_c`, the UI bundle as `ui_main_c`. It refuses an empty
-  package ("would deploy nothing").
-- `checkin-prep --deploy-when-ready` releases the package automatically when prep finishes; use
-  it only when the human wants the whole chain in one go.
+What each phase does is in the *Aspen CLI Developer Guide* (`aspen-docs`). Around it:
+
+- `checkin-prep --deploy-when-ready` runs the rest automatically; use it only when the human wants
+  the whole chain in one go.
 - Capture each phase to a file and filter it, as `diagnose` shows — a failure's causes sit inside
   dozens of cascade lines.
-- A transient error on `save-package` often clears on one retry of the same command. **A
-  check-in phase is not retried blindly** — read `aspen status` first; a poll timeout is a timeout
-  on waiting, not a failure, and the job may still be applying.
+- A transient error on `save-package` often clears on one retry. **A check-in phase is not retried
+  blindly** — read `aspen status` first; a poll timeout is a timeout on waiting, not a failure.
 - Metadata is live on the next request after `checkin-deploy`; no restart.
 
 ## 4. Recovery — shared state, ask first
@@ -67,10 +69,8 @@ explicit go-ahead for the exact verb, and say its scope:
 2. Only if the instance says to ("invoke the checkin-clear action"): `aspen move checkin-clear` —
    halts the active check-in and erases the dev and dev-checkin sets.
 
-`aspen move clear-dev` removes a development code override (`aspen move --dev`) and reverts to the
-checked-in code. **Don't use `aspen move --dev` yet:** in 26.4.1 it looks for code in `server/`
-and `ui/`, not the `rust/` and `typescript/` that `aspen init` creates, so it likely fails in an
-`aspen init` directory. Deploy code through the check-in chain until that is fixed.
+Don't use the development override (`aspen move --rust --dev`) yet, whatever the docs say — see
+`using-aspen` → where the docs are wrong. `aspen move clear-dev` removes one if it exists.
 
 ## 5. Prove it — the round-trip
 

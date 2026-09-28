@@ -53,13 +53,20 @@ export function validatePlugin (root) {
     for (const file of readdirSync(dir)) {
       if (!/\.(md|rs)$/.test(file)) continue
       const body = readFileSync(join(dir, file), 'utf8')
-      for (const [re, why] of RETIRED) assert.ok(!re.test(body), `${skill}/${file}: teaches the retired ${why}`)
+      // The router's corrections table names the retired forms on purpose, to overrule the docs.
+      const taught = body.replace(/^### Where the docs are wrong[\s\S]*?(?=^## )/m, '')
+      for (const [re, why] of RETIRED) assert.ok(!re.test(taught), `${skill}/${file}: teaches the retired ${why}`)
       for (const [, target] of body.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
         if (/^[a-z]+:/.test(target)) continue
         assert.ok(existsSync(join(dir, target)), `${skill}/${file}: broken link ${target}`)
       }
     }
   }
+
+  // A trigger's failure behavior is the developer's decision; the step that asks for it stays.
+  const serverCode = readFileSync(join(root, 'skills/server-code/SKILL.md'), 'utf8')
+  assert.match(serverCode, /Ask the developer how it fails/, 'server-code: the ask-before-writing error step is missing')
+  assert.ok(serverCode.includes('error-handling.md'), 'server-code: must route to error-handling.md')
 
   const hooks = join(root, 'hooks/hooks.json')
   if (existsSync(hooks)) {
@@ -68,6 +75,14 @@ export function validatePlugin (root) {
       const path = /\$\{CLAUDE_PLUGIN_ROOT\}\/([^"\s]+)/.exec(hook.command)?.[1]
       assert.ok(path && existsSync(join(root, path)), `missing hook: ${hook.command}`)
     }
+  }
+
+  // Both hosts reach the same MCP servers: .mcp.json for Claude Code, the manifest for Codex.
+  const mcp = existsSync(join(root, '.mcp.json')) ? json(join(root, '.mcp.json')).mcpServers : {}
+  const codexMcp = codex.mcpServers ?? {}
+  assert.deepEqual(Object.keys(codexMcp).sort(), Object.keys(mcp).sort(), 'MCP servers differ between hosts')
+  for (const [name, server] of Object.entries(mcp)) {
+    assert.equal(codexMcp[name].url, server.url, `${name}: URL differs between hosts`)
   }
 
   const agentsDir = join(root, 'agents')

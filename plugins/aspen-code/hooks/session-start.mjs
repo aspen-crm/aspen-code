@@ -10,6 +10,11 @@
 //   3. Is the session in an instance      `.aspen/config.toml`, which `aspen init` writes,
 //      directory, and for which instance? in the working directory or one above it.
 //
+// A found CLI is not a current CLI: whenever it is found and the note speaks, it asks for
+// `aspenup self update` (the launcher, a no-op when already the promoted release) and, in an
+// instance directory, `aspenup update` (the toolchain that instance serves). The hook itself
+// stays offline, so it cannot tell whether an update exists -- the commands answer that.
+//
 // Missing CLI or missing login: say so, and route to `getting-started`, in every session --
 // that is the onboarding prompt. Logged in to a different instance than the directory's: say
 // so, because every `aspen move` would refuse. In an instance directory: route to `using-aspen`.
@@ -19,7 +24,7 @@
 // network to resolve a toolchain) and never validates the token -- `aspen doctor` does that,
 // and the skills run it. Fails quiet: a crash here must be quieter than the value it adds.
 
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -31,6 +36,7 @@ const INSTALL = isWindows
 
 const nonBlank = (v) => (v && v.trim() ? v : null)
 const isFile = (p) => { try { return statSync(p).isFile() } catch { return false } }
+const isDir = (p) => { try { return statSync(p).isDirectory() } catch { return false } }
 
 // Where the CLI is, or null. aspenup puts its `aspen` proxy in $ASPEN_HOME/bin (default
 // ~/.aspen/bin) and adds that to PATH through the shell rc files -- which a host started before
@@ -82,6 +88,50 @@ export function instanceDir (cwd) {
   }
 }
 
+// A Builder-era folder at or above `cwd`: `metacode/` and its own CLI at `.aspen/bin/aspen`, no
+// `.aspen/config.toml`. The shell's `aspen` there may be that older CLI, and the layout is not the
+// one this plugin authors.
+export function builderFolder (cwd) {
+  let dir = cwd
+  for (;;) {
+    // `metacode/` is what makes it a Builder folder: ~/.aspen/bin/aspen is aspenup's own proxy.
+    const cli = ['aspen', 'aspen.exe'].some((n) => isFile(join(dir, '.aspen', 'bin', n)))
+    if (cli && isDir(join(dir, 'metacode')) && !isFile(join(dir, '.aspen', 'config.toml'))) return dir
+    const up = dirname(dir)
+    if (up === dir) return null
+    dir = up
+  }
+}
+
+// What this instance directory still needs installed before it builds — read from disk only:
+// the npm SDK under typescript/node_modules, cargo, the Rust toolchain rust-toolchain.toml pins (in
+// RUSTUP_HOME), and Node on PATH. `aspen init` installs none of them.
+export function missingDependencies (dir, env = process.env, home = homedir()) {
+  const missing = []
+  const onPath = (name) => (env.PATH || env.Path || '').split(delimiter).filter(Boolean)
+    .some((d) => [name, `${name}.exe`, `${name}.cmd`].some((n) => isFile(join(d, n))))
+  const rust = join(dir, 'rust')
+  if (isDir(rust)) {
+    const cargoHome = nonBlank(env.CARGO_HOME) || join(home, '.cargo')
+    if (!onPath('cargo') && !['cargo', 'cargo.exe'].some((n) => isFile(join(cargoHome, 'bin', n)))) {
+      missing.push('Rust (rustup)')
+    } else {
+      let channel = null
+      try { channel = /^\s*channel\s*=\s*"([^"]+)"/m.exec(readFileSync(join(rust, 'rust-toolchain.toml'), 'utf8'))?.[1] ?? null } catch {}
+      const toolchains = join(nonBlank(env.RUSTUP_HOME) || join(home, '.rustup'), 'toolchains')
+      let names = []
+      try { names = readdirSync(toolchains) } catch {}
+      if (channel && !names.some((n) => n === channel || n.startsWith(`${channel}-`))) missing.push(`Rust ${channel} (pinned by rust/rust-toolchain.toml)`)
+    }
+  }
+  const ts = join(dir, 'typescript')
+  if (isFile(join(ts, 'package.json'))) {
+    if (!onPath('node')) missing.push('Node')
+    if (!isDir(join(ts, 'node_modules', '@aspen-crm', 'sdk'))) missing.push("typescript/'s npm packages")
+  }
+  return missing
+}
+
 // Instance URLs compare without a trailing slash; the CLI normalizes to one, a human rarely types it.
 const sameInstance = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase()
 
@@ -100,6 +150,11 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
     lines.push(`The Aspen CLI is installed at \`${cli.path}\` but this session's PATH does not have it yet. Run it by that full path until the user restarts the terminal/host.`)
   }
 
+  const aspenup = join(dirname(cli.path), isWindows ? 'aspenup.exe' : 'aspenup')
+  const update = (inInstance) => inInstance
+    ? `Before the first Aspen command this session, bring the CLI up to date: \`${aspenup} self update\` (the launcher; a no-op when current), then \`${aspenup} update\` here (installs the aspen toolchain this instance serves). Ask first; say what changed.`
+    : `Before the first Aspen command this session, bring the CLI up to date: \`${aspenup} self update\` (a no-op when already current). Ask first; say what changed.`
+
   const instance = loggedInInstance(credentialsPath(env, home))
   const here = instanceDir(cwd)
   if (!instance) {
@@ -109,12 +164,27 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
       'The login opens a browser and needs a real terminal, so the user runs it, not you: `aspen login -i <instance URL>`.'
     )
     if (here?.instance) lines.push(`This directory belongs to \`${here.instance}\` — that is the URL to sign in to.`)
+    lines.push(update(false))
     return lines.join('\n')
   }
 
-  if (!here) return lines.join('\n')
+  if (!here) {
+    const builder = builderFolder(cwd)
+    if (builder) {
+      lines.push(
+        `\`${builder}\` is a Builder-era folder (\`metacode/\` layout, its own older CLI at \`.aspen/bin/aspen\`), not an instance directory \`aspen init\` created. This plugin does not work in it, and a bare \`aspen\` here may run the old CLI.`,
+        'Before any Aspen work, tell the user and ask which instance they mean; `getting-started` §3 creates its directory with `aspen init` elsewhere.'
+      )
+    }
+    return lines.join('\n')
+  }
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
+  lines.push(update(true))
+  const deps = missingDependencies(here.dir, env, home)
+  if (deps.length) {
+    lines.push(`Build dependencies not installed yet: ${deps.join(', ')}. Offer to install them before any compile — \`getting-started\` step 4 (its \`install-deps.mjs\` shows the plan first).`)
+  }
   if (here.instance && !sameInstance(here.instance, instance)) {
     lines.push(
       `The CLI is signed in to \`${instance}\`, but this directory belongs to \`${here.instance}\`, so every \`aspen move\` here will refuse.`,

@@ -16,8 +16,13 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **Every skill is routed from `using-aspen`**, and its frontmatter `description` says *when* to
   use it. Keep bodies procedures, not essays.
 - **Agents are read-only** — never give `schema-explorer` or `metadata-reviewer` Write/Edit.
-- **The hook stays offline, read-only and quiet**: it never runs the CLI (the aspenup proxy can
-  reach the network), never reads a secret, and exits 0 on any error.
+- **Hooks stay offline, read-only and fail open**: they never run the CLI (the aspenup proxy can
+  reach the network), never read a secret, and exit 0 with no output on any error. There are two:
+  `session-start.mjs` (readiness note) and `guard-instance.mjs` (right binary, folder and
+  instance for every `aspen` command). Anything else the plugin enforces lives in skill prose.
+- **Installing is consented, planned and idempotent.** `install-deps.mjs` prints its plan by
+  default, installs project dependencies only with `--run` and machine-wide tools only with
+  `--machine`, and skips anything already satisfied. Keep new install steps to that shape.
 - **Bump the version in both manifests** on every shipped change.
 
 ## Verify before "done"

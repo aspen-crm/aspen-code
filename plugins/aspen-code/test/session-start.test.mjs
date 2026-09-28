@@ -62,6 +62,19 @@ test('not signed in, inside an instance directory: names the URL to sign in to',
   assert.ok(out.includes(URL_A))
 })
 
+test('a found CLI is always asked to update: launcher, and in an instance the served toolchain', t => {
+  const notSignedIn = context(machine(t, { cli: true, onPath: true }))
+  assert.match(notSignedIn, /aspenup self update/)
+  assert.doesNotMatch(notSignedIn, /aspenup update/)
+  const inInstance = context(machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A }))
+  assert.match(inInstance, /aspenup self update/)
+  assert.match(inInstance, /aspenup update. here/)
+})
+
+test('no CLI: no update line, the installer instead', t => {
+  assert.doesNotMatch(context(machine(t)), /self update/)
+})
+
 test('signed in, outside any instance directory: silent', t => {
   assert.equal(context(machine(t, { cli: true, onPath: true, login: URL_A })), '')
 })
@@ -77,6 +90,37 @@ test('signed in to a different instance than the directory: warns before any dep
   assert.match(out, /using-aspen/)
   assert.match(out, /will refuse/)
   assert.ok(out.includes(`aspen login -i ${URL_A}`))
+})
+
+test('a Builder-era folder is named as such, not treated as an instance directory', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A })
+  const old = join(m.home, 'Aspen', 'legacy')
+  mkdirSync(join(old, '.aspen', 'bin'), { recursive: true })
+  writeFileSync(join(old, '.aspen', 'bin', 'aspen'), '#!/bin/sh\n')
+  mkdirSync(join(old, 'metacode'), { recursive: true })
+  const out = context({ ...m, cwd: join(old, 'metacode') })
+  assert.match(out, /Builder-era folder/)
+  assert.doesNotMatch(out, /using-aspen/)
+})
+
+test('an instance directory with no build dependencies says what is missing', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  const dir = join(m.home, 'Aspen', 'acme_dev')
+  mkdirSync(join(dir, 'rust'), { recursive: true })
+  writeFileSync(join(dir, 'rust', 'rust-toolchain.toml'), '[toolchain]\nchannel = "1.98.1"\n')
+  mkdirSync(join(dir, 'typescript'), { recursive: true })
+  writeFileSync(join(dir, 'typescript', 'package.json'), '{}')
+  let out = context(m)
+  assert.match(out, /Build dependencies not installed yet: Rust \(rustup\), Node, typescript\/'s npm packages/)
+  assert.match(out, /install-deps\.mjs/)
+  // cargo present, pinned toolchain absent; then everything present: silent about dependencies.
+  mkdirSync(join(m.home, '.cargo', 'bin'), { recursive: true }); writeFileSync(join(m.home, '.cargo', 'bin', 'cargo'), '')
+  assert.match(context(m), /Rust 1\.98\.1 \(pinned/)
+  mkdirSync(join(m.home, '.rustup', 'toolchains', '1.98.1-aarch64-apple-darwin'), { recursive: true })
+  mkdirSync(join(dir, 'typescript', 'node_modules', '@aspen-crm', 'sdk'), { recursive: true })
+  const bin = join(m.home, 'nodebin'); mkdirSync(bin); writeFileSync(join(bin, 'node'), '')
+  out = context({ ...m, env: { ...m.env, PATH: `${m.env.PATH}:${bin}` } })
+  assert.doesNotMatch(out, /Build dependencies/)
 })
 
 test('ASPEN_CONFIG_DIR overrides where credentials are read', t => {

@@ -18,6 +18,7 @@ Three facts, in this order. The session-start note states them when hooks are on
 | The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` §1 |
 | It is signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` §2 — the **user** runs `aspen login` |
 | You are in that instance's directory | a `.aspen/config.toml` here or above | `getting-started` §3 — `aspen init` |
+| Its build dependencies are installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` §4 — `install-deps.mjs` |
 
 Then run **`aspen doctor`** once in the instance directory. It is the CLI's own readiness report
 (JSON when an agent runs it, one `id` + `status` per check, exit 1 only on a `problem`). Fix every
@@ -25,24 +26,30 @@ Then run **`aspen doctor`** once in the instance directory. It is the CLI's own 
 the CLI and the instance are on different releases — nothing will compile or deploy correctly
 until that is resolved (see `diagnose`).
 
-## The directory
+## The directory and the reference
 
-`aspen init` wrote it, and its own `AGENTS.md` (which `CLAUDE.md` imports) is the authority on
-the layout and naming rules. Read it once per session. The short version:
+`aspen init` wrote the directory; its `AGENTS.md` (imported by `CLAUDE.md`) and the docs page
+*Managing Component Files* describe the layout. In one line: author metadata only in
+`metadata/custom/` (the `platform/`, `active/` and `compiled/` layers are replaced by the next
+fetch or compile), server code in `rust/`, UI in `typescript/`.
 
-```
-<domain>_<instance>/
-  .aspen/config.toml      which instance this directory is for
-  metadata/custom/        AUTHORED — the only metadata you write, and the only layer committed
-  metadata/platform/      fetched from the instance      — read-only
-  metadata/active/        fetched: custom already deployed — read-only
-  metadata/compiled/      written by `aspen compile`       — read-only, the resolved truth
-  rust/                   the one server crate (triggers, web APIs)
-  typescript/             the one UI codefile (not covered by this plugin yet)
-  data/
-```
+The **Aspen docs** are the reference, shipped as the `aspen-docs` MCP server —
+`searchDocumentation`, then `getPage` on the URL it returns (fallback: any page URL + `.md`, or
+`https://aspencrm.gitbook.io/docs/llms.txt`). They cover every component type (Platform), the CLI
+(*Aspen CLI Developer Guide*, *Command Reference*), the Rust SDK, AQL, and the REST API. Skills
+here carry the loop and what the docs leave out. When sources disagree: the CLI (`--help`, and
+what it actually does) and the compiler first, then real components in `metadata/active/` and
+`platform/`, then the docs, then a skill — and say which was wrong so it gets fixed.
 
-Anything written outside `metadata/custom/` is replaced by the next fetch or compile.
+### Where the docs are wrong for CLI 26.4.1 — follow this, not the page
+
+| The docs say | Actually |
+|---|---|
+| Log in with `aspen login -i <url> -k <api-key>` | `aspen login -i <url>` is OAuth in a browser, run **by the user** in their own terminal (it refuses under an agent). This plugin never uses an API key. |
+| `aspen download aspenc` fetches the validator | No `download` command exists. aspenup installs `aspenc` with `aspen`; `aspen compile --metadata` runs it. |
+| `aspen move --rust --dev` for fast Rust iteration | It looks for code in `server/` and `ui/`, not the `rust/` and `typescript/` that `aspen init` creates. Deploy code through the check-in chain until that is fixed. |
+| A `custom_page` tab's `page-ui-code` is a URL template | The form that passed check-in is `ui_main_c.<route name>` (see `metadata/metadata-shapes.md`). |
+| The Query Service example formats a value into the AQL string | Fine for constants and ids; never for request-supplied text. |
 
 ## The loop
 
@@ -74,6 +81,12 @@ copy the shape, change it, compile.
 
 - **The CLI is the authority on its own verbs.** When a skill and `aspen <command> --help`
   disagree, `--help` wins — and the skill is wrong; tell the human so it gets fixed in this plugin.
+- **Right binary, right folder, right instance — every `aspen` command.** Run it from the
+  session's instance directory (or pass that directory with `--dir`), and only after
+  `.aspen/config.toml` there names the instance the user means *and* the one the CLI is signed
+  in to. If the shell's `aspen` is a folder-local Builder-era CLI, run `~/.aspen/bin/aspen` by
+  its full path. Never point a command at another instance's folder without the user asking. A
+  guard hook enforces this (Claude Code asks or refuses; Codex refuses and says how to confirm).
 - **Never handle credentials.** `aspen login` is OAuth in a browser and refuses to run from an
   agent. The user runs it. You never see, type, ask for, or print a token or API key.
 - **`aspen compile` before every deploy.** It runs the instance's own validator offline and
@@ -90,10 +103,12 @@ copy the shape, change it, compile.
 
 | Thought | Reality |
 |---|---|
+| "I'll `cd` to the other instance folder and deploy there too" | A different instance. Only when the user asked for that folder — the guard will ask. |
 | "I'll run `aspen login` for them" | It refuses under an agent. Hand the command to the user. |
 | "I'll edit `metadata/compiled/` / `active/`" | Replaced on the next compile/fetch. Author in `metadata/custom/`. |
 | "I'll guess the attribute name" | Copy a real component from `metadata/compiled/` or `platform/`. |
 | "It compiled, so it works" | Deploy, then a record round-trip. |
 | "The check-in is stuck; I'll clear it" | Shared state. Ask first — `build-and-deploy`. |
+| "I'll just `bail!` if the rule fails" | Ask the developer how each failure should reach the UI and the API first — `server-code` step 1. |
 | "I'll name the crate `server_main_c`" | Don't rename anything. The CLI deploys the `rust/` crate as `server_main_c` itself. |
 | "A deal object" | `opportunity_p` exists. `lean-data-model`. |

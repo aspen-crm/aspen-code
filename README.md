@@ -19,7 +19,11 @@ The Claude Code and Codex plugin for building on an Aspen instance with the **as
 3. **Signs in with OAuth.** `aspen login -i <instance URL>` opens a browser. The CLI refuses to do
    this under an agent, so the model hands the command to the user to run in their own terminal —
    it never sees or asks for a credential.
-4. **Creates the instance directory** with `aspen init` and checks it with `aspen doctor`.
+4. **Creates the instance directory** with `aspen init`, then **installs what it needs to build**
+   — `aspen init` installs nothing. A bundled script shows the plan, then installs the Rust
+   toolchain the crate pins (with `wasm32-wasip2`), the crate's dependencies, and `typescript/`'s
+   npm packages; with separate consent it also installs rustup and a Node that meets the UI
+   tooling's `^24.11.1`. Then `aspen doctor` confirms it.
 5. **Builds on it:** decide whether a component should exist and which tier it belongs in, author
    metadata and Rust triggers, validate offline with `aspen compile`, deploy through the check-in
    chain with the user's go-ahead, and prove it with a record round-trip.
@@ -27,7 +31,7 @@ The Claude Code and Codex plugin for building on an Aspen instance with the **as
 | Skill | When |
 |---|---|
 | `using-aspen` | The router — any Aspen change starts here |
-| `getting-started` | Install, OAuth sign-in, `aspen init`, `aspen doctor` |
+| `getting-started` | Install/update the CLI, OAuth sign-in, `aspen init`, install the project's dependencies, `aspen doctor` |
 | `lean-data-model` | Before creating any object, field, picklist or tab: should it exist? |
 | `model-first` | Before any feature: metadata, trigger, or page? |
 | `metadata` | Authoring `metadata/custom/` and validating with `aspen compile --metadata` |
@@ -37,7 +41,19 @@ The Claude Code and Codex plugin for building on an Aspen instance with the **as
 
 Agents: `schema-explorer` and `metadata-reviewer`, both read-only.
 
-Not in 0.0.1: TypeScript UI authoring guidance, and the guard hooks from 2.8.x.
+**Docs:** the plugin connects the [Aspen documentation](https://aspencrm.gitbook.io/docs) as the
+`aspen-docs` MCP server (GitBook's public endpoint, no sign-in). The component-type reference lives
+there, not in the skills; the skills keep the loop and what the docs leave out. The skills assume
+the whole site — Platform, Customization (CLI, Aspen SDK, Custom UI), API and AQL. While
+Customization and API are sign-in-only, the public endpoint cannot return them; they become
+reachable when those sections are published.
+
+**Guard:** before any `aspen` command runs, a hook checks it is aspenup's CLI (not a Builder-era
+folder-local one), run from an instance directory, whose instance matches both the session's
+folder and the login. It refuses a deploy verb outside an instance folder or against a
+mismatched login, and asks before a command leaves the session's folder.
+
+Not in 0.0.1: TypeScript UI authoring guidance, and the other guard hooks from 2.8.x.
 
 ## Install (testers)
 

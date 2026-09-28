@@ -1,14 +1,29 @@
 ---
 name: getting-started
-description: Use when the aspen CLI is not installed, not signed in, signed in to the wrong instance, or there is no instance directory yet — on a fresh machine, a first session, or when the session-start note says so. Installs the CLI (with consent), hands the user the OAuth sign-in, creates the instance directory with aspen init, and checks it with aspen doctor.
+description: Use when the aspen CLI is not installed or out of date, not signed in, signed in to the wrong instance, there is no instance directory yet, or its build dependencies (Rust toolchain, crates, Node, npm packages) are missing — on a fresh machine, a first session, or when the session-start note says so. Installs or updates the CLI (with consent), hands the user the OAuth sign-in, creates the instance directory with aspen init, installs its dependencies, and checks it with aspen doctor.
 ---
 
 # Getting started
 
-Four steps, each ending in a check you run. Do them in order and stop at the first one that is
+Five steps, each ending in a check you run. Do them in order and stop at the first one that is
 already done — the session-start note usually says which.
 
-## 1. Install the CLI — with consent
+## 1. Install or update the CLI — with consent
+
+**Already installed? Update it, don't skip it** — a found CLI is often behind the promoted release:
+
+```sh
+aspenup self update     # the launcher → the promoted release; prints "already the promoted release" when current
+aspenup update          # in an instance directory: the aspen toolchain that instance serves
+```
+
+The launcher and the toolchain are separate. `self update` never changes which `aspen` runs; in
+an instance directory the proxy runs the toolchain that instance serves, and `aspenup update`
+refreshes that answer. Don't install a newer toolchain than the instance serves — that is the
+mismatch `aspen doctor` reports as `instance.cli-matches-instance`. Say what changed (the versions
+before and after), then go to step 2.
+
+Not installed:
 
 The CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and later fetches the
 toolchain each instance serves. Tell the user what it does (downloads from
@@ -68,35 +83,58 @@ instance and holds no secret. Read only that field.
 
 ## 3. Create the instance directory — `aspen init`
 
-`aspen init` needs the login. It creates `<domain>_<instance>/` under the working directory (or
-`--dir`), scaffolds `metadata/`, `rust/`, `typescript/`, `data/`, an `AGENTS.md` and a
-`.gitignore`, and fetches `metadata/platform/` and `metadata/active/` from the instance.
+What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matters here:
 
-- **Ask where it should go** (e.g. `~/Aspen`) before running it. It refuses a non-empty directory
-  that is not already an instance directory, and it never overwrites a file.
-- Run from **inside** an existing instance directory it completes that one — the safe way to
-  restore a missing scaffold file or refresh the fetched layers.
-- Afterwards, the session should work **in** that directory: tell the user to reopen the host
-  there (or `cd` for your commands, and say you did).
-- Suggest `git init` and a first commit: `metadata/custom/`, `rust/` and `typescript/` are the
-  source; the `.gitignore` already excludes the fetched and compiled layers.
+- It needs the login, and it names the directory after the instance. **Ask where it should go**
+  (e.g. `~/Aspen`), then `aspen init --dir <there>`.
+- It refuses a non-empty directory that is not already an instance directory, and never
+  overwrites a file. Run again from **inside** an instance directory, it completes a fresh clone or
+  refreshes the fetched `platform/` and `active/` layers.
+- Afterwards the session should work **in** that directory: tell the user to reopen the host there
+  (or `cd` for your commands, and say you did). Suggest `git init` and a first commit.
 
 **Check:** `.aspen/config.toml` names the instance you signed in to.
 
-## 4. Check the directory — `aspen doctor`
+## 4. Install the project's dependencies — right after `aspen init`
+
+`aspen init` installs nothing. Building needs the Rust toolchain the crate pins (with
+`wasm32-wasip2`) and its crates, and a Node that satisfies the UI tooling (`^24.11.1`, npm
+`^11.6.2`) plus `typescript/`'s packages. The bundled script does all of it. Resolve it from the
+absolute directory holding this `SKILL.md`, and run it from the instance directory:
+
+```sh
+node "<this skill's dir>/scripts/install-deps.mjs"             # the plan; changes nothing
+node "<this skill's dir>/scripts/install-deps.mjs" --run       # install the project's dependencies
+node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rustup / Node for this user
+```
+
+1. **Show the user the plan** and ask to install. It has two kinds of step, and they need
+   separate consent:
+   - *project* — a pinned Rust toolchain, `cargo fetch --locked`, and `npm ci`/`npm install` in
+     `typescript/`: writes inside the instance directory and the user's package caches.
+   - *machine* — rustup (rustup.rs, or winget on Windows) and Node (via nvm, fnm, winget or
+     Homebrew, whichever is present): installs a tool for the user. Name the tool and how.
+2. **Run it** with `--run`, adding `--machine` only when the user agreed to the machine steps.
+   Exit 0 means everything is installed; 3 means it stopped at a machine step it was not allowed to
+   do (or one it cannot do, printed as `manual` — hand the user that one); 1 means a step failed.
+3. **npm can't authenticate** ("E401", "Unable to authenticate"): npm is pointed at a private
+   registry (a corporate mirror) the user is not signed in to. The Aspen packages are on public
+   npm — ask, then re-run with `--public-registry`. Don't edit the user's `.npmrc`.
+4. `npm install` writes `typescript/package-lock.json` the first time — suggest committing it.
+5. A rustup or Node installed during the run is not on this session's PATH until the user restarts
+   the terminal/host; the script finds rustup in `~/.cargo/bin` itself. On Windows, Rust also needs
+   the Visual Studio C++ Build Tools — the script cannot install those; say so.
+
+## 5. Check the directory — `aspen doctor`
 
 ```sh
 aspen doctor            # JSON under an agent; one {id, status, message, fix} per check
 ```
 
-Exit 1 means at least one `problem`. Work the `remediation` list top down; each carries the exact
-command. Expected on a fresh directory, and fine until you need that tier:
-
-- `rust.component-built`, `typescript.bundle-built` — warnings until the first `aspen compile`.
-- `typescript.deps-installed` — `npm install` in `typescript/` when you first build UI.
-- `toolchain.cargo-runnable` / `toolchain.wasm-target` — needed for Rust:
-  install rustup, then `rustup target add wasm32-wasip2` (the crate's `rust-toolchain.toml` pins
-  the channel; rustup fetches it on first build).
+Exit 1 means at least one `problem`. After step 4 every `toolchain.*`, `rust.*` and
+`typescript.*` check should be `ok`, except two warnings that stay until the first build:
+`rust.component-built` and `typescript.bundle-built`. If a dependency check still fails, re-run the
+script — it re-checks and does only what is missing.
 
 Not fine, stop and tell the user:
 

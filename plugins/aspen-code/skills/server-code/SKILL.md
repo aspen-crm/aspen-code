@@ -12,63 +12,72 @@ at all.
 
 ## 0. Orient — before writing a line
 
-- **Read the crate `aspen init` scaffolded:** `rust/aspen.server.json`, `rust/src/lib.rs`,
-  `rust/Cargo.toml`. Add to it; never create a second crate, and never rename it — the CLI
-  deploys it as `server_main_c` whatever it is called (`rust-trigger-notes.md` says why).
-- **Read the object you are triggering** for exact field names and types:
-  `metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or
-  `metadata/platform/` / `metadata/active/`. The variant you match on depends on the field's
-  `type`/`subtype`, not on what you would guess.
-- **Start from `trigger-patterns.rs`** beside this file — six handlers that fired on a real
-  instance, plus the helper block they share. It builds unchanged against the scaffolded crate
-  (with `jiff = "0.2"` added). Copy the helpers and the one handler closest to yours.
-- **Read `rust-trigger-notes.md`** when no pattern covers your case: the `RecordFieldValue`
-  variant per field type, the changed-fields-only update batch, inserting and updating records,
-  and the ordered checklist for a trigger that "isn't firing".
-- **Querying** from a trigger (`context.services().query()`): read `query-notes.md` first —
-  `LIMIT` is mandatory, one line only, and `name_p` is not a universal display field.
-- The `aspen-crm` crate source is the truth for types and methods; after the first build it is at
-  `~/.cargo/registry/src/*/aspen-crm-*/src/`. Grep it rather than docs.rs.
+- **The reference is the Aspen SDK docs** — ask `aspen-docs`: *Project Configuration*
+  (`aspen.server.json`, `entrypoints!`), *Record Triggers* (events, contexts, `FieldState`, field
+  and record errors, update deltas), *Web API*, and the *Record*, *Query*, *Log*, *HTTP* and
+  *Runtime Context* services. Read the page for what you are about to use.
+- **Read the crate `aspen init` scaffolded** (`rust/aspen.server.json`, `rust/src/lib.rs`,
+  `rust/Cargo.toml`) and add to it. Never create a second crate or rename this one — the CLI
+  deploys it as `server_main_c` whatever it is called.
+- **Read the object you are triggering** for exact field names and each field's `type`/`subtype`
+  (`metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or `active/` /
+  `platform/`). The `RecordFieldValue` variant you read or write follows the field's metadata, not
+  what you would guess.
+- **Start from `trigger-patterns.rs`** beside this file: six handlers that fired on a real
+  instance, plus the helpers they share. It builds unchanged against the scaffolded crate (with
+  `jiff = "0.2"` added). Copy the helpers and the one handler closest to yours.
+- **Read `rust-trigger-notes.md`** for what the docs leave out: the toolchain pin and lockfile, the
+  variant per field type (polyids and their discriminators), `.failures()` on writes, date
+  arithmetic, and the ordered checklist for a trigger that "isn't firing".
+- **Querying?** `query-notes.md` first — one line only, at most 100 rows back, `CURRENT_USER()`
+  and `LIKE` limits. Never interpolate request-supplied text into a statement.
+- The `aspen-crm` crate source is the final word on types: after the first build it is at
+  `~/.cargo/registry/src/*/aspen-crm-*/src/`.
 
-## 1. Declare — `rust/aspen.server.json`
+## 1. Ask the developer how it fails — before writing the trigger
 
-```json
-{
-  "record-triggers": [
-    { "name": "renewal_guard_c", "object": "renewal_c", "events": ["before_insert", "before_update"] }
-  ],
-  "web-apis": [
-    { "name": "hello_c", "methods": ["GET"], "path": "/hello", "interface": "simple" }
-  ]
-}
-```
+A trigger that rejects or can fail needs the developer's decision on **how each failure reaches
+the user in the UI and the caller of the API**. Don't pick for them, and don't default to
+`bail!`. Read `error-handling.md` beside this file first — it has what each option actually
+produces, including that the error `code` never reaches an API caller.
 
-Keep the scaffold's `hello_c` web API or remove it deliberately — it is a working example of the
-second entry kind. Events are exactly `before_insert | after_insert | before_update |
-after_update | before_delete | after_delete`. `entrypoints!` generates one trait named **exactly**
-the entry's `name`, with one method per event (or HTTP method). Neither `object` nor `events` is
-checked against metadata at compile time — a typo compiles and never runs.
+List every failure the trigger can detect (each rule it enforces, each write or query it makes),
+then ask — with the host's question tool if it has one (Claude Code: AskUserQuestion), otherwise in
+chat, and wait for the answer:
 
-## 2. Implement
+1. **Presentation** — per condition: a *field error* (shown on that field; API item carries the
+   field name), a *record error* (the form's banner; API item without a field), or *abort the
+   whole write* (`Err`: an error modal, the entire batch rolls back, the text arrives wrapped as
+   `before trigger error '…'`).
+2. **Batch behavior** — reject only the offending records and let the rest commit, or fail the
+   whole batch if any record is bad (an import of 500 rows either way).
+3. **The message** — the exact words the user reads. It is shown verbatim; no code or subtype
+   survives. If an integration needs a stable identifier, agree on one in the message text, or
+   offer a Web API endpoint instead.
+4. **Its own failures** — if the trigger's insert/update rows fail or a query errors: fail the
+   save, reject that record, or skip and continue.
 
-```rust
-impl renewal_guard_c for Entrypoints {
-    fn before_insert(context: &BeforeInsertContext) -> error::Result<()> {
-        for record in context.batch().iter() { /* validate or set fields */ }
-        Ok(())
-    }
-}
-```
+Fold the answers into the **error table** (format in `error-handling.md`) and show it before
+writing code. Skip the questions only for a trigger that never rejects and makes no writes or
+queries (e.g. setting a default), or when the developer already said how — then state the
+choice you are implementing in one line.
 
-- `record.get(field)?` → `FieldState::Value(..) | Null | Absent`. **On `before_update` the batch
-  carries only changed fields**: `Absent` means "not in this write — read the stored value",
-  `Null` means "cleared".
-- Reject a save with `error::bail!("…")` from a before-trigger (or a field error on the record) —
-  it surfaces to the user at the save and rejects the write. That is also the only confirmed way to
-  see a message from a trigger; `info!`/`warn!` output has no confirmed reader.
-- Batch your work: collect across the whole batch, then at most one insert and one update per
-  object — N records is one round trip, not N.
-- Build query statements from `Uuid`s and constants only — never interpolate request text.
+For a **Web API**, ask the same about its responses: which HTTP status and `ErrorResponse` type
+for each failure, and whether a partial failure is a warning or a failure (`standard` and `batch`
+interfaces; see the *Web API* docs page).
+
+## 2. Rules the docs do not state
+
+- `object` and `events` in `aspen.server.json` are not checked against metadata — a typo compiles,
+  deploys, and never runs.
+- **On `before_update` / `after_update` the batch holds only changed fields.** Read anything else
+  with a query on `id_p` (which `record.get("id_p")` always returns).
+- **Batch your work:** collect across the whole batch, then at most one insert and one update per
+  object. N records is one round trip, not N.
+- **A trigger that writes back to its own object needs a write-only-on-change guard**, or it
+  re-fires itself.
+- The only output a user or caller sees is a rejection — field error, record error, or `Err`
+  (step 1). Log lines are not readable from the CLI.
 
 ## 3. Build
 
@@ -83,10 +92,12 @@ A componentization error naming wit-bindgen is the toolchain pin, not a dependen
 ## 4. Deploy and prove it
 
 Hand off to `build-and-deploy`. A trigger is done when a record written through a real path shows
-the behavior — the derived field set, the save rejected with your message — not when it compiles.
+the behavior — the derived field set, the save rejected **where the error table says**, with its
+message (on the field, in the banner, or the whole save refused), and the API response the
+developer expects — not when it compiles.
 
 ## Definition of done
 
-Field names read from metadata · declared for the right object and events · `aspen compile`
-clean · deployed · proven with a record round-trip. Then summarize what the rule does, the message
-it rejects with, and the edge cases it skips (e.g. an empty optional field).
+Field names and types read from metadata · error handling agreed with the developer (the error
+table) · declared for the right object and events · `aspen compile` clean · deployed · proven with a record round-trip. Then summarize what the rule does,
+the message it rejects with, and the edge cases it skips (e.g. an empty optional field).

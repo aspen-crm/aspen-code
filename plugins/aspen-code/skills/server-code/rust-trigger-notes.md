@@ -47,16 +47,12 @@ Per machine: rustup, and `rustup target add wasm32-wasip2` (doctor: `toolchain.w
 rust-runner`), so `cargo test` in `rust/` runs the tests as wasm through the CLI. Keep business
 logic in plain functions so it can be tested without a record context.
 
-## Registration: `aspen.server.json`
+## The API itself is in the docs
 
-```json
-{ "record-triggers": [ { "name": "<trigger>_c", "object": "<object>", "events": ["after_update"] } ] }
-```
-
-`events` takes exactly these six strings: `before_insert`, `after_insert`, `before_update`,
-`after_update`, `before_delete`, `after_delete`. Each maps to a context type of the same name
-(`AfterUpdateContext`) and a method of the same name on the trait `entrypoints!` generates from
-`name`. Neither `object` nor `events` is checked against metadata at compile time.
+`aspen.server.json`, the six events and their context types, `FieldState`, field and record
+errors, and the Record, Query, Log and Runtime Context services are documented in the Aspen SDK
+section — ask `aspen-docs` ("record triggers", "record service", "query service"). What follows is
+only what those pages do not say.
 
 ## When the notes don't cover it: read the crate source, not docs.rs
 
@@ -73,30 +69,17 @@ after-* records, `id()` only on delete records), `services/` has the query and r
 `aspen-crm-macros` is a dead end for a componentization error — that comes from the toolchain,
 see above, not from what `entrypoints!` generates.
 
-## Inserting a record
+## Writing records: check `.failures()`, set every discriminator
 
-```rust
-let input = RecordInput::builder()
-    .field("subject_p", RecordFieldValue::Text("...".to_string()))
-    .field("owner_p", RecordFieldValue::PolyidParent(owner_id))
-    .field("owneron_p", RecordFieldValue::PicklistObjectRef("user_p".to_string()))
-    .build()?;
-let request = InsertRequest::builder("task_p").record(input).build()?;
-let result = context.services().record().execute_insert(request)?;
-```
+The Record Service page covers building and executing inserts and updates. Two things it does not
+stress, both of which produced a trigger that "did nothing":
 
-The object name (`"task_p"`) is the `InsertRequest` builder's argument, not a field on
-`RecordInput`. `execute_insert` is a method on `RecordService` (`context.services().record()`),
-not on the request builder — an easy pair to get backwards, and the compiler catches it, but only
-after you've written the wrong version first.
-
-`task_p.owner_p` is `PolyidParent` here, not `IdLookup`, because that's what its own field
-metadata says (`type: polyid`, `subtype: parent`); `owneron_p` is `owner_p`'s discriminator
-companion and has to be set alongside it — see "Field types: which `RecordFieldValue` variant to
-write" below for both the variant table and why the discriminator is never optional, even here
-where `owner_p` only ever points at `user_p`. Bind `execute_insert`'s return value and check it —
-see "Debugging a trigger" below for why a bare `execute_insert(request)?;` hides exactly the errors
-you need to see while getting this shape right the first time.
+- A row that fails validation comes back inside `Ok(BatchProcessed)`, in `.failures()` — a bare
+  `execute_insert(request)?;` never sees it. Bind the result and check it (see "Debugging a
+  trigger" below).
+- A polyid needs its discriminator set alongside it, with the right variant — see "Field types"
+  below. `task_p.owner_p` is `PolyidParent`, not `IdLookup`, and `owneron_p` is required even
+  though `owner_p` only ever points at `user_p`.
 
 ## Reading fields in a trigger
 
@@ -114,19 +97,9 @@ triggers can identify which record they're looking at, so the platform has to po
 regardless of the changed-only rule. If a match on it ever falls through to your catch-all arm,
 look elsewhere first (field name typo, wrong variant) — it almost never means the id is missing.
 
-Use the id to read anything else about the record with a separate query. **`SELECT` requires a
-`LIMIT`** — a query without one is rejected at query time; adding `LIMIT 1` (nothing else changed)
-turned a real query from failing to working. The rest of the AQL rules — one line only, `LIMIT` at
-most 1000, two-hop dot-walking, `AS` when two leaf names collide — are in `query-notes.md` beside
-this file; it is the same query language a page sends, so they apply here too:
-
-```rust
-let id = /* from record.get("id_p") */;
-let query = context.services().query()
-    .query(format!("SELECT name_c, account_c FROM org_c WHERE id_p = '{id}' LIMIT 1"))
-    .build()?;
-let rows = context.services().query().execute(query)?;
-```
+Use the id to read anything else about the record with a separate query — AQL requires `LIMIT`
+(a query without one fails at query time), and `query-notes.md` beside this file has the traps the
+AQL docs leave out.
 
 A query row's cells are `Option<ValidFieldValue>` — a different type from a batch record's
 `FieldState`, with its own match shape:
@@ -301,8 +274,9 @@ turned out to be the actual answer once, after everything downstream of it looke
    This is exactly what surfaced the two field-shape errors above (`whaton_p`'s variant, `owner_p`'s
    missing discriminator) as readable messages instead of a trigger that just never inserted
    anything.
-7. **There is no confirmed way to read `aspen_crm::warn!`/`info!` output.** This instance has no
-   logs UI reachable from the CLI or the devtools API (both were tried and found nothing). What
+7. **There is no confirmed way to read `aspen_crm::warn!`/`info!` output yourself.** The Log
+   Service forwards them to platform logging, and the platform decides which levels are kept, but
+   nothing reachable from the CLI or the devtools API shows them (both were tried). What
    *is* confirmed visible: a **hard error** — an `Err` returned from the entrypoint, e.g. via
    `error::bail!` — surfaces at the point of the save that fired the trigger, in the UI, as an
    error on that save. A `warn!`/`info!` call inside a `_ => continue` catch-all is invisible; the

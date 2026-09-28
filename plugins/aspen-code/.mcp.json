@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aspen-docs": {
+      "type": "http",
+      "url": "https://aspencrm.gitbook.io/docs/~gitbook/mcp"
+    }
+  }
+}
