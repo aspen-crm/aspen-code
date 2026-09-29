@@ -1,0 +1,17 @@
+{
+  "name": "aspen-code",
+  "description": "Aspen Code for internal testing: build on an Aspen instance with the aspenup CLI. Installs the latest release zip, no git needed.",
+  "owner": {
+    "name": "Aspen CRM"
+  },
+  "plugins": [
+    {
+      "name": "aspen-code",
+      "source": {
+        "source": "archive",
+        "url": "https://github.com/aspen-crm/aspen-code/releases/latest/download/aspen-code.zip"
+      },
+      "description": "Install the aspen CLI, sign in with OAuth, then author metadata and Rust triggers, compile, deploy and verify."
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+name: release
+# Attaches aspen-code.zip (the plugin folder at the tagged commit) to a release. The no-git
+# marketplace, setup/marketplace.json, installs it from releases/latest/download/aspen-code.zip.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to (re)attach the zip to, e.g. v0.0.1
+        required: true
+permissions:
+  contents: write
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git archive --format=zip --prefix=aspen-code/ -o aspen-code.zip "$TAG:plugins/aspen-code"
+      - run: gh release upload "$TAG" aspen-code.zip --clobber

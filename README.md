@@ -69,6 +69,9 @@ Not in 0.0.1: TypeScript UI authoring guidance, and the other guard hooks from 2
 | Install | `/plugin install aspen-code@aspen-code` | `codex plugin add aspen-code@aspen-code` |
 | Update | `/plugin marketplace update aspen-code` | `codex plugin marketplace upgrade aspen-code` |
 
+No git? Claude Code can add `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json`
+instead, which installs the latest release zip; [setup/README.md](setup/README.md) covers Codex.
+
 Then start a **new** session. In Codex, review and trust the plugin's hook (plugin install does
 not trust hooks); without it the skills still work, and the model checks the CLI itself.
 
@@ -88,6 +91,9 @@ To try a local change: `claude --plugin-dir ./plugins/aspen-code`, or point the 
 your checkout (`/plugin marketplace add ~/path/to/aspen-code`). Bump the version in **both**
 `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` on every change you ship — the
 validator fails if they differ.
+
+**Releasing:** publish a GitHub release tagged `v<version>`. The `release` workflow attaches
+`aspen-code.zip`, which the no-git marketplace (`setup/marketplace.json`) installs from.
 
 ## Promotion
 
