@@ -30,6 +30,9 @@ plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
 5. **Builds on it:** decide whether a component should exist and which tier it belongs in, author
    metadata and Rust triggers, validate offline with `aspen compile`, deploy through the check-in
    chain with the user's go-ahead, and prove it with a record round-trip.
+6. **Migrates records** from another Aspen instance with a bundled script. It uses the REST API
+   and an API key the user saves to a file for each instance; the model passes only the file's
+   path. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
 
 | Skill | When |
 |---|---|
@@ -41,6 +44,7 @@ plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
 | `server-code` | Rust record triggers and web APIs in `rust/` (six verified patterns) |
 | `build-and-deploy` | `aspen compile` → `save-package` → `checkin-prep` → `checkin-index` → `checkin-deploy` → verify |
 | `diagnose` | Failed compiles/check-ins, version skew, login trouble, triggers that don't fire |
+| `instance-migration` | Copy records from another Aspen instance: map objects, fields and picklist values with the user, dry run, pilot, bulk load through the REST API, verify |
 
 Agents: `schema-explorer` and `metadata-reviewer`, both read-only.
 

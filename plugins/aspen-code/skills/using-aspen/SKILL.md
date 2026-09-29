@@ -1,6 +1,6 @@
 ---
 name: using-aspen
-description: Use for ANY change to an Aspen instance with the aspen CLI — authoring or extending objects, fields, picklists, layouts, list views, tabs, writing a Rust record trigger or web API, compiling, deploying through the check-in chain, and verifying. Routes each moment of the loop to the right skill, in order. Start here.
+description: Use for ANY change to an Aspen instance with the aspen CLI — authoring or extending objects, fields, picklists, layouts, list views, tabs, writing a Rust record trigger or web API, compiling, deploying through the check-in chain, verifying, and migrating records from another instance. Routes each moment of the loop to the right skill, in order. Start here.
 ---
 
 # Building on Aspen
@@ -62,6 +62,7 @@ what it actually does) and the compiler first, then real components in `metadata
 | 4 | Writing a Rust record trigger or web API in `rust/` | `server-code` |
 | 5 | Compile, deploy through the check-in chain, prove it with a record round-trip | `build-and-deploy` |
 | — | A compile, check-in, or the instance behaves unexpectedly | `diagnose` |
+| — | Move records (and the objects and fields they need) from another Aspen instance into this one | `instance-migration` |
 
 Steps 1 and 2 happen **before the first file**. Nothing on this platform deletes, so they are only
 cheap now. Skip them only when the tier is already settled: fixing a field you authored last turn,
