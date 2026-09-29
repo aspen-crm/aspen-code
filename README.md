@@ -8,6 +8,9 @@ The Claude Code and Codex plugin for building on an Aspen instance with the **as
 > CLI. Production users are unaffected: it is a separate marketplace. When it is ready it will be
 > promoted into aspen-tools and the old versions deprecated — see [Promotion](#promotion).
 
+**Setting up?** Point Claude Code or Codex at [setup/README.md](setup/README.md). It installs the
+plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
+
 ## What it does
 
 1. **Gets the machine ready.** A session-start check (offline, silent when there is nothing to say)
