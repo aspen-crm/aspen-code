@@ -28,7 +28,9 @@ Audit, highest severity first:
    `extends`; a segment not ending `_c`/`_p`, under 2 or over 24 characters, or with an underscore in
    its last two characters before the suffix; a subcomponent not named `<parent>.<segment>`; a
    `number` without string `min-value`/`max-value`; `indexed` on an id, polyid, checkbox or long
-   text; a polyid missing its companion fields.
+   text; a polyid missing its companion fields; any file carrying `mtype` or `namespace`; an
+   overlay carrying an identifying attribute such as a layout's `object`; a platform `_p` section
+   or field copied into an overlay by `name` instead of referenced with `extends`.
 5. **Unreachable** — a new `_c` object without a layout, list view, and a tab in a collection.
 6. **Unreviewable** — anything you could not compare against a layer; say what and why.
 

@@ -12,7 +12,11 @@ the Aspen docs (below) on each component type's attributes — read them, don't 
 
 ## The loop
 
-1. **Find the shape — copy, never invent.** Three sources, best first:
+1. **Read the docs page for each ctype you touch**, through `aspen-docs` (table below), before
+   the first file. If `aspen-docs` is not connected, for example because it needs authorizing,
+   stop and tell the user to authorize it (`/mcp`). Don't author from memory.
+
+   **Then find the shape — copy, never invent.** Three sources, best first:
    - `metadata/active/<ctype path>/` — custom components **already deployed** on this instance, as
      authored source. The closest thing to what you are about to write.
    - `metadata/platform/<ctype path>/` — the platform's own components.
@@ -34,7 +38,16 @@ the Aspen docs (below) on each component type's attributes — read them, don't 
    - **Changing a platform component:** an overlay with `"extends": "<platform name>"` carrying
      **only** the attributes you change (fields you add go in its `fields`). `extends` appears only
      in `custom/`. Look at `metadata/active/object_p/` — extended platform objects look exactly
-     like this.
+     like this. "Only" is literal: `ctype`, `extends`, the changes, nothing else. Leave out the
+     identifying attributes, such as a layout's `object` ("is locked and cannot be extended").
+   - **Child components of an overlay** (a layout's `sections`, an object's `fields`): list only
+     your new `_c` children, plus `{"extends": "<platform child>", …changes}` for a platform child
+     you change. Platform children merge in on their own. A platform child copied in by `name` is
+     rejected ("does not match the expected namespace of custom"). Some child attributes are
+     locked too, for example `active` on some platform layout sections.
+   - **No authored file carries `mtype` or `namespace`**, whether it is new or an overlay
+     ("unknown fields: mtype", "namespace field not allowed in input"). The instance `AGENTS.md`
+     "Every metadata file" example shows both. That example is wrong (CLI 26.4.1), so leave them out.
 
 3. **Compile:** `aspen compile --metadata`. Nothing leaves the machine. It validates `custom/`
    against `active/` + `platform/` exactly as `checkin-prep` would. On failure it prints
@@ -67,14 +80,16 @@ on the URL it returns). Read the page for the ctype you are writing before autho
 | Object, object type, picklist, layout, list view, tab, tab collection, lifecycle, … | `…/platform/component-types/<type>` (e.g. `list-view`, `tab-collection`) |
 
 If the MCP is unavailable, fetch the same page with `.md` appended, or the index at
-`https://aspencrm.gitbook.io/docs/llms.txt`. **Precedence:** the compiler's verdict, then real
+`https://aspencrm.gitbook.io/docs/llms.txt`. If that fails too (a 403, or a network block
+page), say so and have the user authorize `aspen-docs`. Don't carry on from memory. **Precedence:** the compiler's verdict, then real
 components in `active/`/`platform/`, then the docs, then this skill.
 
 ## What the docs do not say — learned from real check-ins
 
 - **Nothing deletes.** Retire a component, field, column or tab with `"active": false` and keep
-  the file. Dropping a child entry or deleting a deployed file fails check-in ("Child components
-  cannot be dropped"). Reordering is fine.
+  the file. Dropping a deployed custom child entry or deleting a deployed file fails check-in
+  ("Child components cannot be dropped"). Platform children are never dropped by leaving them out
+  of an overlay, because they merge in through `extends`. Reordering is fine.
 - **An object is not reachable until it has a layout, a list view, and a tab placed in a tab
   collection.** After creating one, check all four exist.
 - **Extending a tab collection replaces its custom children.** Its `tabs` list must include every
