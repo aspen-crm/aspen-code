@@ -99,6 +99,14 @@ export function validatePlugin (root) {
 export function validateMarketplace (repoRoot) {
   const market = json(join(repoRoot, '.claude-plugin/marketplace.json'))
   assert.ok(market.name && market.owner?.name && market.plugins?.length)
+  // The no-git marketplace (added by URL) lists the same plugins, each from its release zip.
+  const zipMarket = json(join(repoRoot, 'setup/marketplace.json'))
+  assert.equal(zipMarket.name, market.name, 'setup/marketplace.json: name differs from the git marketplace')
+  assert.deepEqual(zipMarket.plugins.map(p => p.name), market.plugins.map(p => p.name), 'setup/marketplace.json: plugins differ')
+  for (const p of zipMarket.plugins) {
+    assert.equal(p.source?.source, 'archive', `setup/marketplace.json: ${p.name} must use an archive source`)
+    assert.match(p.source.url, /^https:\/\/github\.com\/aspen-crm\/aspen-code\/releases\/latest\/download\/[\w.-]+\.zip$/)
+  }
   return market.plugins.map((p) => {
     const root = resolve(repoRoot, p.source)
     const result = validatePlugin(root)

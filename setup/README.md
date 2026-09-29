@@ -10,7 +10,8 @@ should live, e.g. `~/Aspen`):
 Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. My Aspen instance is https://<host>/<domain>/<instance>.
 ```
 
-You need `git` installed: both hosts fetch the plugin with it.
+`git` is recommended but not required. Without it, Claude Code installs the plugin from its
+release zip, and Codex from a downloaded copy.
 
 ---
 
@@ -28,15 +29,33 @@ First work out two things:
 Get the **instance URL** from the prompt, or ask for it: `https://<host>/<domain>/<instance>`,
 the instance's address in the browser up to the instance name.
 
-### 1. Check that git can reach the plugin repository
+### 1. Choose where the plugin comes from
+
+Run `git --version`. If git is missing, suggest installing it (`xcode-select --install` on macOS,
+`winget install --id Git.Git -e` on Windows, the distribution's package on Linux), but carry on
+without it if the user would rather not. Pick the marketplace `<source>` for step 3:
+
+| Host | With git | Without git |
+|---|---|---|
+| Claude Code | `aspen-crm/aspen-code` | `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json` |
+| Codex | `aspen-crm/aspen-code` | `~/.aspen-code`, after the download below |
+
+**Codex without git only:** download the plugin (it fetches only from `github.com`).
+
+macOS / Linux:
 
 ```sh
-git ls-remote https://github.com/aspen-crm/aspen-code.git HEAD
+rm -rf ~/.aspen-code && mkdir -p ~/.aspen-code && curl -fsSL https://github.com/aspen-crm/aspen-code/archive/refs/heads/main.tar.gz | tar -xz -C ~/.aspen-code --strip-components=1
 ```
 
-`git: command not found`? The user needs git: `xcode-select --install` on macOS, `winget install
---id Git.Git -e` on Windows, the distribution's package on Linux. Ask, then install or hand them
-the command. Any other failure is network or proxy trouble. Say so and stop.
+Windows (PowerShell):
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\.aspen-code" -ErrorAction SilentlyContinue; New-Item -ItemType Directory "$HOME\.aspen-code" | Out-Null; curl.exe -fsSL -o "$env:TEMP\aspen-code.tar.gz" https://github.com/aspen-crm/aspen-code/archive/refs/heads/main.tar.gz; tar -xzf "$env:TEMP\aspen-code.tar.gz" -C "$HOME\.aspen-code" --strip-components=1
+```
+
+**Check:** `~/.aspen-code/.claude-plugin/marketplace.json` exists. If the download fails, it's
+network or proxy trouble. Say so and stop.
 
 ### 2. Remove the production plugin, if it is installed
 
@@ -55,14 +74,17 @@ removing a marketplace uninstalls everything from it.
 
 | Host | Commands |
 |---|---|
-| Claude Code | `claude plugin marketplace add aspen-crm/aspen-code` then `claude plugin install aspen-code@aspen-code` |
-| Codex | `codex plugin marketplace add aspen-crm/aspen-code` then `codex plugin add aspen-code@aspen-code` |
+| Claude Code | `claude plugin marketplace add <source>` then `claude plugin install aspen-code@aspen-code` |
+| Codex | `codex plugin marketplace add <source>` then `codex plugin add aspen-code@aspen-code` |
+
+`<source>` is the one you picked in step 1.
 
 **Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.1 or
 later, enabled.
 
-Already installed? Update it: `claude plugin marketplace update aspen-code` (Claude Code) or
-`codex plugin marketplace upgrade aspen-code` (Codex).
+Already installed? Update it: `claude plugin update aspen-code@aspen-code` (Claude Code) or
+`codex plugin marketplace upgrade aspen-code` (Codex). Codex installed from the download? Re-run
+the step 1 download first.
 
 ### 4. Install or update the Aspen CLI
 
@@ -142,7 +164,7 @@ account layout."*
 
 | Symptom | Fix |
 |---|---|
-| `marketplace add` fails | git is missing, or GitHub is unreachable from this network: see step 1 |
+| `marketplace add` fails | With `aspen-crm/aspen-code`: git is missing or GitHub is unreachable; use the without-git source in step 1. Otherwise GitHub is unreachable from this network |
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
 | `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or restart the terminal |
 | `aspen login` says "Interactive login is not supported" | It was run by the agent. The user runs it in their own terminal |
