@@ -35,7 +35,8 @@ fetch or compile), server code in `rust/`, UI in `typescript/`.
 
 The **Aspen docs** are the reference, shipped as the `aspen-docs` MCP server —
 `searchDocumentation`, then `getPage` on the URL it returns (fallback: any page URL + `.md`, or
-`https://aspencrm.gitbook.io/docs/llms.txt`). They cover every component type (Platform), the CLI
+`https://aspencrm.gitbook.io/docs/llms.txt`). If neither is reachable, tell the user and have
+them authorize `aspen-docs` (`/mcp`) before you author anything. They cover every component type (Platform), the CLI
 (*Aspen CLI Developer Guide*, *Command Reference*), the Rust SDK, AQL, and the REST API. Skills
 here carry the loop and what the docs leave out. When sources disagree: the CLI (`--help`, and
 what it actually does) and the compiler first, then real components in `metadata/active/` and
