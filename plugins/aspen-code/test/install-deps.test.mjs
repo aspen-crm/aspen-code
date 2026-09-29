@@ -46,11 +46,24 @@ test('--run without --machine skips machine steps, holds their dependents, and e
   assert.deepEqual(status, { rustup: 'skipped', 'rust-toolchain': 'waiting', 'cargo-deps': 'waiting', node: 'skipped', 'npm-deps': 'waiting' })
 })
 
-test('--public-registry pins npm to registry.npmjs.org; a lockfile switches to npm ci', t => {
+test('npm uses registry.npmjs.org unless --configured-registry; a lockfile switches to npm ci', t => {
   const { dir, run } = bare(t)
+  const npm = (...a) => JSON.parse(run('--json', ...a).stdout).steps.find(s => s.id === 'npm-deps')
+  assert.deepEqual(npm().run.argv, ['install', '--registry=https://registry.npmjs.org/'])
   writeFileSync(join(dir, 'typescript', 'package-lock.json'), '{}')
-  const npm = JSON.parse(run('--json', '--public-registry').stdout).steps.find(s => s.id === 'npm-deps')
-  assert.deepEqual(npm.run.argv, ['ci', '--registry=https://registry.npmjs.org/'])
+  assert.deepEqual(npm().run.argv, ['ci', '--registry=https://registry.npmjs.org/'])
+  assert.deepEqual(npm('--configured-registry').run.argv, ['ci'])
+})
+
+test('a lockfile resolved through a mirror is named in the plan', t => {
+  const { dir, run } = bare(t)
+  writeFileSync(join(dir, 'typescript', 'package-lock.json'), JSON.stringify({ packages: {
+    'node_modules/a': { resolved: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz' },
+    'node_modules/b': { resolved: 'https://mirror.example.com/npm/store/b/-/b-1.0.0.tgz' }
+  } }))
+  const npm = JSON.parse(run('--json').stdout).steps.find(s => s.id === 'npm-deps')
+  assert.match(npm.why, /resolves packages through mirror\.example\.com,/)
+  assert.doesNotMatch(npm.why, /through[^;]*registry\.npmjs\.org/)
 })
 
 test('outside an instance directory, or with an unknown flag, it refuses (exit 2)', t => {

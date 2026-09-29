@@ -168,5 +168,5 @@ account layout."*
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
 | `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or restart the terminal |
 | `aspen login` says "Interactive login is not supported" | It was run by the agent. The user runs it in their own terminal |
-| npm fails with `E401` / "Unable to authenticate" | npm is pointed at a private mirror. When the plugin asks, let it use the public registry |
+| npm fails with `E401` / "Unable to authenticate" | `typescript/package-lock.json` was resolved through a private mirror. When the plugin asks, let it delete the lockfile and `node_modules` and re-install from public npm |
 | Go back to production | `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen`. Codex: `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen` |
