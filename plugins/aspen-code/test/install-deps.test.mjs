@@ -32,6 +32,7 @@ test('the plan names every missing piece, with its scope, and changes nothing', 
   const by = Object.fromEntries(steps.map(s => [s.id, s]))
   assert.deepEqual(Object.keys(by), ['rustup', 'rust-toolchain', 'cargo-deps', 'node', 'npm-deps'])
   assert.equal(by.rustup.scope, 'machine'); assert.ok(by.rustup.needed)
+  if (process.platform !== 'win32') assert.match(by.rustup.run.argv.join(' '), /--no-modify-path/) // the user edits their own profile
   assert.deepEqual(by['rust-toolchain'].run.argv, ['toolchain', 'install', '1.98.1', '--target', 'wasm32-wasip2'])
   assert.deepEqual(by['cargo-deps'].run.argv, ['fetch', '--locked'])
   assert.equal(by.node.scope, 'machine'); assert.match(by.node.why, /\^24\.11\.1/)

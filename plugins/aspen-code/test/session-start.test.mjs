@@ -39,12 +39,14 @@ test('no CLI: routes to getting-started with the installer', t => {
   assert.match(out, /not installed/)
   assert.match(out, /getting-started/)
   assert.match(out, /installer\.(sh|ps1)/)
+  assert.match(out, /--no-modify-path|-NoModifyPath/) // the user edits their own profile
 })
 
 test('CLI in ~/.aspen/bin but not on PATH: says to use the full path', t => {
   const m = machine(t, { cli: true, login: URL_A })
   const out = context(m)
   assert.match(out, /PATH does not have it/)
+  assert.match(out, /never edit their shell profile/)
   assert.ok(out.includes(join(m.home, '.aspen', 'bin', 'aspen')))
 })
 

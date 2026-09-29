@@ -79,7 +79,7 @@ removing a marketplace uninstalls everything from it.
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.1 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.2 or
 later, enabled.
 
 Already installed? Update it: `claude plugin update aspen-code@aspen-code` (Claude Code) or
@@ -97,19 +97,19 @@ Is it installed? Check with `aspen --version`, or by its full path `~/.aspen/bin
 ~/.aspen/bin/aspenup self update
 ```
 
-**Not installed:** tell the user it downloads from `static-assets.veevaxdev.com`, installs to
-`~/.aspen`, and adds `~/.aspen/bin` to their shell's PATH. Then, with their go-ahead:
+**Not installed:** tell the user it downloads from `static-assets.veevaxdev.com` and installs to
+`~/.aspen`. It leaves their shell profile alone. Then, with their go-ahead:
 
 macOS / Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y
+curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 | iex
+irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
 ```
 
 If the host refuses to run the installer, hand the user the command for their OS and ask them
@@ -117,6 +117,11 @@ to run it in their own terminal. Then wait.
 
 **Check:** `~/.aspen/bin/aspen --version` prints a version. This session's PATH predates the
 install, so use the full path for the rest of this session.
+
+**Ask the user to put it on their PATH.** Don't edit their shell profile yourself. Give them the
+line to add: `. "$HOME/.aspen/env"` in `~/.zshrc` (zsh) or `~/.bashrc` (bash; `~/.bash_profile` on
+macOS), `source "$HOME/.aspen/env.fish"` in `~/.config/fish/config.fish` (fish). On Windows, give
+them the change the installer printed. New terminals then find `aspen`.
 
 ### 5. Sign in — the user does this
 
@@ -135,13 +140,15 @@ install, so use the full path for the rest of this session.
 `%APPDATA%\aspen\credentials.json`) names that instance. Read only that field; the file never
 holds the secret, which is in the OS keychain.
 
-### 6. Restart, then the first prompt
+### 6. Load the plugin, then the first prompt
 
-The plugin loads when a session starts, so tell the user:
+No restart is needed. Tell the user:
 
-1. **Restart** Claude Code or Codex in the same folder.
-   - **Codex:** when asked, review and **trust** the Aspen Code hooks. They run the setup checks
-     and make sure every `aspen` command uses the right CLI, folder and instance.
+1. **Load the plugin** into this session:
+   - **Claude Code:** type `/reload-plugins`.
+   - **Codex:** type `/new` to start a new thread, which picks up the plugin. When asked, review
+     and **trust** the Aspen Code hooks. They run the setup checks and make sure every `aspen`
+     command uses the right CLI, folder and instance.
 2. Send this as the first prompt:
 
    ```text
@@ -166,7 +173,7 @@ account layout."*
 |---|---|
 | `marketplace add` fails | With `aspen-crm/aspen-code`: git is missing or GitHub is unreachable; use the without-git source in step 1. Otherwise GitHub is unreachable from this network |
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
-| `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or restart the terminal |
+| `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or add the PATH line from step 4 and open a new terminal |
 | `aspen login` says "Interactive login is not supported" | It was run by the agent. The user runs it in their own terminal |
 | npm fails with `E401` / "Unable to authenticate" | `typescript/package-lock.json` was resolved through a private mirror. When the plugin asks, let it delete the lockfile and `node_modules` and re-install from public npm |
 | Go back to production | `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen`. Codex: `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen` |
