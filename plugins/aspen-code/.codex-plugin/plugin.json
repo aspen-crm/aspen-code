@@ -5,6 +5,7 @@
     "name": "Aspen CRM"
   },
   "repository": "https://github.com/aspen-crm/aspen-code",
+  "license": "Apache-2.0",
   "keywords": [
     "aspen",
     "veeva",

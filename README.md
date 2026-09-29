@@ -100,3 +100,7 @@ When 0.x is ready for production:
    `aspen-code@aspen`; the plugin name stays `aspen-code`, so nothing else changes for users.
 2. Deprecate the 2.x line in aspen-tools' release notes and README (the Builder-era CLI path).
 3. Archive this repository, or keep it as the pre-release channel.
+
+## License
+
+[Apache License 2.0](LICENSE).
