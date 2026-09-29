@@ -6,11 +6,13 @@
 //   node install-deps.mjs [instance-dir]                 print the plan, change nothing
 //   node install-deps.mjs [instance-dir] --run           install the project's dependencies
 //   node install-deps.mjs [instance-dir] --run --machine also install rustup / Node for this user
-//   … --public-registry   fetch npm packages from registry.npmjs.org, not the configured registry
+//   … --configured-registry  fetch npm packages from npm's configured registry, not registry.npmjs.org
 //   … --json              the plan (or the results) as JSON
 //
 // Two scopes, two consents. "project" steps write only inside the instance directory and the
 // user's package caches (a pinned Rust toolchain, cargo's registry, typescript/node_modules).
+// The npm packages come from registry.npmjs.org by default: the Aspen packages are public there,
+// and a user-level mirror (a corporate CodeArtifact, say) often needs a sign-in the user lacks.
 // "machine" steps install a tool for the user (rustup; Node through a version manager or the
 // OS package manager) and run only with --machine. Every step is idempotent and skipped when
 // already satisfied, so re-running is the way to check.
@@ -32,7 +34,7 @@ const NODE_RANGE_FALLBACK = { node: '^24.11.1', npm: '^11.6.2' }
 const args = process.argv.slice(2)
 const flag = (f) => args.includes(f)
 const dirArg = args.find((a) => !a.startsWith('--'))
-const unknown = args.filter((a) => a.startsWith('--') && !['--run', '--machine', '--public-registry', '--json'].includes(a))
+const unknown = args.filter((a) => a.startsWith('--') && !['--run', '--machine', '--configured-registry', '--json'].includes(a))
 if (unknown.length) { console.error(`unknown option: ${unknown.join(' ')}`); process.exit(2) }
 
 // The instance directory: the given one, or the nearest with `.aspen/config.toml`.
@@ -105,6 +107,28 @@ function nodeInstaller (major) {
   return null
 }
 
+// Hosts other than registry.npmjs.org that package-lock.json resolves tarballs from.
+function lockHosts () {
+  try {
+    const hosts = new Set([...readFileSync(join(tsDir, 'package-lock.json'), 'utf8').matchAll(/"resolved":\s*"https?:\/\/([^/"]+)/g)].map((m) => m[1]))
+    hosts.delete('registry.npmjs.org')
+    return [...hosts]
+  } catch { return [] }
+}
+
+// Why an npm run failed, when the output says, with what to do about it.
+function npmFailure (out) {
+  if (/E401|ENEEDAUTH|Unable to authenticate|authentication token/i.test(out)) {
+    const foreign = lockHosts()
+    if (foreign.length) return `npm could not authenticate against ${foreign.join(', ')}, where package-lock.json resolves packages; with the user's go-ahead, delete typescript/package-lock.json and typescript/node_modules and re-run to resolve them from ${PUBLIC_NPM}`
+    if (flag('--configured-registry')) return `npm could not authenticate against its configured registry; the Aspen packages are public — re-run without --configured-registry`
+  }
+  if (!flag('--configured-registry') && /ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|E403|CERT|certificate/i.test(out)) {
+    return `npm could not reach ${PUBLIC_NPM}; if this network only reaches a mirror, re-run with --configured-registry`
+  }
+  return null
+}
+
 function plan () {
   const steps = []
   const pin = toolchainPin()
@@ -157,15 +181,16 @@ function plan () {
             ? [`via ${inst.how}`, inst.note].filter(Boolean).join('. ')
             : `no Node version manager or package manager found — install Node ${major} LTS from https://nodejs.org, then re-run`
         })
-    const registry = capture('npm', ['config', 'get', 'registry'], { cwd: tsDir })
+    const registry = flag('--configured-registry') ? capture('npm', ['config', 'get', 'registry'], { cwd: tsDir }) : PUBLIC_NPM
     const lock = isFile(join(tsDir, 'package-lock.json'))
     const installedDeps = existsSync(join(tsDir, 'node_modules', '@aspen-crm', 'sdk'))
-    const npmArgs = [lock ? 'ci' : 'install', ...(flag('--public-registry') ? [`--registry=${PUBLIC_NPM}`] : [])]
+    const foreign = lock ? lockHosts() : []
+    const npmArgs = [lock ? 'ci' : 'install', ...(flag('--configured-registry') ? [] : [`--registry=${PUBLIC_NPM}`])]
     steps.push({
       id: 'npm-deps', scope: 'project', after: 'node', needed: !installedDeps,
       why: installedDeps
         ? 'typescript/node_modules has the Aspen SDK'
-        : `install typescript/'s packages (${lock ? 'from package-lock.json' : 'no lockfile yet; this writes one — commit it'})${registry && !registry.startsWith(PUBLIC_NPM) && !flag('--public-registry') ? `; npm is configured for ${registry}, and the Aspen packages are on ${PUBLIC_NPM} — if this fails to authenticate, re-run with --public-registry` : ''}`,
+        : `install typescript/'s packages from ${registry ?? "npm's configured registry"} (${lock ? 'from package-lock.json' : 'no lockfile yet; this writes one — commit it'})${foreign.length ? `; package-lock.json resolves packages through ${foreign.join(', ')}, and npm ci fetches from there whatever the registry` : ''}`,
       run: { cmd: 'npm', argv: npmArgs, cwd: tsDir }
     })
   }
@@ -189,12 +214,9 @@ function execute (steps) {
     if (capture && !flag('--json')) process.stderr.write(`${r.stdout ?? ''}${r.stderr ?? ''}`)
     const ok = r.status === 0
     const tail = `${r.stdout ?? ''}${r.stderr ?? ''}`
-    const auth = /E401|ENEEDAUTH|Unable to authenticate|authentication token/i.test(tail)
     results.push({
       id: step.id, status: ok ? 'done' : 'failed',
-      detail: ok ? step.why : (step.id === 'npm-deps' && auth && !flag('--public-registry')
-        ? 'npm could not authenticate against the configured registry; the Aspen packages are public — re-run with --public-registry'
-        : `exit ${r.status ?? r.error?.message}`)
+      detail: ok ? step.why : ((step.id === 'npm-deps' && npmFailure(tail)) || `exit ${r.status ?? r.error?.message}`)
     })
     if (!ok) break
   }

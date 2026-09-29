@@ -117,9 +117,11 @@ node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rust
 2. **Run it** with `--run`, adding `--machine` only when the user agreed to the machine steps.
    Exit 0 means everything is installed; 3 means it stopped at a machine step it was not allowed to
    do (or one it cannot do, printed as `manual` — hand the user that one); 1 means a step failed.
-3. **npm can't authenticate** ("E401", "Unable to authenticate"): npm is pointed at a private
-   registry (a corporate mirror) the user is not signed in to. The Aspen packages are on public
-   npm — ask, then re-run with `--public-registry`. Don't edit the user's `.npmrc`.
+3. **npm registry.** The script installs from public npm (`registry.npmjs.org`), where the Aspen
+   packages are, whatever the user's `.npmrc` names — so a corporate mirror they are not signed in
+   to doesn't matter. Don't edit the user's `.npmrc`. If npm fails, the result says why: a
+   network that only reaches a mirror → re-run with `--configured-registry`; a `package-lock.json`
+   resolved through a mirror → ask, then delete it and `typescript/node_modules` and re-run.
 4. `npm install` writes `typescript/package-lock.json` the first time — suggest committing it.
 5. A rustup or Node installed during the run is not on this session's PATH until the user restarts
    the terminal/host; the script finds rustup in `~/.cargo/bin` itself. On Windows, Rust also needs
