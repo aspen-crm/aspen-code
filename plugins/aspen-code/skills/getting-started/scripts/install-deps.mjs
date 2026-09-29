@@ -141,8 +141,10 @@ function plan () {
           why: 'rustup is not installed; the rust/ crate cannot build without it',
           run: WIN
             ? { cmd: 'winget', argv: ['install', '--id', 'Rustlang.Rustup', '-e', '--accept-source-agreements', '--accept-package-agreements'] }
-            : { cmd: 'sh', argv: ['-c', "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none"] },
-          note: WIN ? 'Building on Windows also needs the Visual Studio C++ Build Tools for the host-side build scripts.' : undefined
+            : { cmd: 'sh', argv: ['-c', "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none"] },
+          note: WIN
+            ? 'Building on Windows also needs the Visual Studio C++ Build Tools for the host-side build scripts.'
+            : 'Leaves shell profiles alone; the user adds `. "$HOME/.cargo/env"` to theirs to put cargo on PATH.'
         })
     const installed = ru ? capture(ru, ['toolchain', 'list']) ?? '' : ''
     const haveChannel = installed.split('\n').some((l) => l.startsWith(`${pin.channel}-`) || l.split(' ')[0] === pin.channel)

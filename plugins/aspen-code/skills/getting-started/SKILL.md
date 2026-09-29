@@ -27,30 +27,42 @@ Not installed:
 
 The CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and later fetches the
 toolchain each instance serves. Tell the user what it does (downloads from
-`static-assets.veevaxdev.com`, installs to `~/.aspen`, adds `~/.aspen/bin` to their shell PATH)
-and **ask before running it**.
+`static-assets.veevaxdev.com`, installs to `~/.aspen`) and **ask before running it**.
 
 macOS / Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y
+curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 | iex
+irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
 ```
 
 `-y` skips the installer's own confirmation, which cannot be answered from your shell — the user's
-consent to you is the confirmation. Add `--no-modify-path` if they do not want rc files touched.
+consent to you is the confirmation. `--no-modify-path` leaves the user's shell profile alone: that
+file is theirs to change, not yours.
 
 **If the host blocks it** (a permission prompt the user declines, or a security classifier), stop
 — no workarounds. Hand them the command for their OS and say: *run this in a terminal (VS Code:
 Terminal → New Terminal), then tell me when it finishes.*
 
 **Check:** `~/.aspen/bin/aspen --version` (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
-This session's PATH predates the install, so use that full path until the user restarts the host.
+This session's PATH predates the install, so use that full path for the rest of the session.
+
+**Then ask the user to put it on their PATH.** Never edit a shell profile yourself. Give them the
+line for their shell to add in their own editor; new terminals then find `aspen`:
+
+| Shell | File | Line |
+|---|---|---|
+| zsh | `~/.zshrc` | `. "$HOME/.aspen/env"` |
+| bash | `~/.bashrc` (macOS: `~/.bash_profile`) | `. "$HOME/.aspen/env"` |
+| fish | `~/.config/fish/config.fish` | `source "$HOME/.aspen/env.fish"` |
+| PowerShell | user `Path` | the change the installer printed |
+
+If they would rather not, the full path works everywhere.
 
 ## 2. Sign in — the user does this, with OAuth
 
@@ -123,9 +135,11 @@ node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rust
    network that only reaches a mirror → re-run with `--configured-registry`; a `package-lock.json`
    resolved through a mirror → ask, then delete it and `typescript/node_modules` and re-run.
 4. `npm install` writes `typescript/package-lock.json` the first time — suggest committing it.
-5. A rustup or Node installed during the run is not on this session's PATH until the user restarts
-   the terminal/host; the script finds rustup in `~/.cargo/bin` itself. On Windows, Rust also needs
-   the Visual Studio C++ Build Tools — the script cannot install those; say so.
+5. On macOS/Linux rustup installs with `--no-modify-path`. If the run installed it, ask the user to add
+   `. "$HOME/.cargo/env"` to their shell profile (fish: `source "$HOME/.cargo/env.fish"`); never edit
+   it yourself. A tool installed during the run is never on this session's PATH, and the script finds
+   rustup in `~/.cargo/bin` itself. On Windows, Rust also needs the Visual Studio C++ Build Tools —
+   the script cannot install those; say so.
 
 ## 5. Check the directory — `aspen doctor`
 
