@@ -60,8 +60,6 @@ Not in 0.0.1: TypeScript UI authoring guidance, and the other guard hooks from 2
 
 ## Install (testers)
 
-You need read access to this repository; the hosts clone it with your git credentials.
-
 **Uninstall the production plugin first**, or you will have two sets of Aspen skills:
 
 | | Claude Code | Codex |

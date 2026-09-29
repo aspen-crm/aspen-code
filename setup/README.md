@@ -7,11 +7,10 @@ and the Aspen CLI, and gets the user signed in. A person can follow it too.
 should live, e.g. `~/Aspen`):
 
 ```text
-Read the Aspen Code setup guide — run `gh api repos/aspen-crm/aspen-code/contents/setup/README.md -H "Accept: application/vnd.github.raw"` — and follow it. My Aspen instance is https://<host>/<domain>/<instance>.
+Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. My Aspen instance is https://<host>/<domain>/<instance>.
 ```
 
-> Access: `aspen-crm/aspen-code` is private during testing. You need read access to it, and git
-> credentials for GitHub in your terminal (`gh auth login`).
+You need `git` installed: both hosts fetch the plugin with it.
 
 ---
 
@@ -29,14 +28,15 @@ First work out two things:
 Get the **instance URL** from the prompt, or ask for it: `https://<host>/<domain>/<instance>`,
 the instance's address in the browser up to the instance name.
 
-### 1. Check access to the plugin repository
+### 1. Check that git can reach the plugin repository
 
 ```sh
 git ls-remote https://github.com/aspen-crm/aspen-code.git HEAD
 ```
 
-If this fails, stop. The user needs read access to `aspen-crm/aspen-code`, and GitHub credentials
-in their terminal (`gh auth login`, then `gh auth setup-git`). Say so, and wait.
+`git: command not found`? The user needs git: `xcode-select --install` on macOS, `winget install
+--id Git.Git -e` on Windows, the distribution's package on Linux. Ask, then install or hand them
+the command. Any other failure is network or proxy trouble. Say so and stop.
 
 ### 2. Remove the production plugin, if it is installed
 
@@ -142,7 +142,7 @@ account layout."*
 
 | Symptom | Fix |
 |---|---|
-| `marketplace add` fails with a 404 or an authentication error | No access to the private repo, or no git credentials: see step 1 |
+| `marketplace add` fails | git is missing, or GitHub is unreachable from this network: see step 1 |
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
 | `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or restart the terminal |
 | `aspen login` says "Interactive login is not supported" | It was run by the agent. The user runs it in their own terminal |
