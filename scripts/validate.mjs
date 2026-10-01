@@ -23,7 +23,8 @@ const RETIRED = [
   [/aspen download\b/, 'aspen download (no such verb)'],
   [/aspen move save-package \.\/metacode/, 'save-package ./metacode'],
   [/Aspen Builder created/, 'Builder-created folders (aspen init creates the directory)'],
-  [/aspen login[^\n`]*(--api-key|\s-k\s)/, 'API-key login (sign-in is OAuth, run by the user)']
+  [/aspen login[^\n`]*(--api-key|\s-k\s)/, 'API-key login (sign-in is OAuth, run by the user)'],
+  [/--(source|target)-token\b|\btokenFile\b|\.aspen-tokens/, 'migration token files (each command signs in through the browser)']
 ]
 
 export function validatePlugin (root) {

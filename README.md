@@ -30,9 +30,9 @@ plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
 5. **Builds on it:** decide whether a component should exist and which tier it belongs in, author
    metadata and Rust triggers, validate offline with `aspen compile`, deploy through the check-in
    chain with the user's go-ahead, and prove it with a record round-trip.
-6. **Migrates records** from another Aspen instance with a bundled script. It uses the REST API
-   and an API key the user saves to a file for each instance; the model passes only the file's
-   path. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
+6. **Migrates records** from another Aspen instance with a bundled script. It uses the REST API,
+   and the user signs in to each instance in the browser when a command needs it; the token is
+   never stored, and the model never sees it. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
 
 | Skill | When |
 |---|---|

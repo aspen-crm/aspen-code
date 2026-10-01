@@ -1,44 +1,95 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
+import { signIn } from '../skills/instance-migration/scripts/signin.mjs'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'instance-migration', 'scripts', 'migrate.mjs')
-const SRC_TOKEN = 'secret-token:aspen_SOURCE_' + randomUUID()
-const TGT_TOKEN = 'secret-token:aspen_TARGET_' + randomUUID()
 const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
-// ---- a fake Aspen instance: describe, query and record writes, with the rules the real one enforces
+// ---- a fake Aspen instance: sign-in, describe, query and record writes, with the rules the real
+// one enforces. Sign-in follows the dev pod: the resource is the origin, PKCE S256 is required,
+// a refresh rotates both tokens and retires the old access token, and revoke takes a refresh token.
 
 const text = (name, o = {}) => ({ name, type: 'text', subtype: o.long ? 'long' : 'text', required: !!o.required, unique: !!o.unique })
 const lookup = (name, to) => ({ name, type: 'id', subtype: 'lookup', relationship: to })
 const picklist = (name, list = name) => ({ name, type: 'picklist', subtype: 'picklist', picklist: list })
+const objectType = (name) => ({ name, type: 'picklist', subtype: 'object_type_ref' }) // a reference picklist: no list of its own
 const number = (name) => ({ name, type: 'number', subtype: 'number' })
 const date = (name) => ({ name, type: 'date', subtype: 'date' })
 const datetime = (name) => ({ name, type: 'datetime', subtype: 'datetime' })
 const SYSTEM = [{ name: 'id_p', type: 'id', subtype: 'id' }, datetime('ct_p'), datetime('mt_p'), lookup('cb_p', 'user_p'), lookup('mb_p', 'user_p')]
 
-async function mockInstance ({ base, token, objects, picklists, records, failCreate = () => false }) {
+async function mockInstance ({ base, objects, picklists, records, failCreate = () => false, expireAfter = Infinity }) {
   const calls = []
+  const issued = [] // every code and token handed out, to prove none leaks
+  const codes = new Map()
+  const access = new Map() // access token → requests served
+  const live = new Set() // refresh tokens neither rotated nor revoked
+  const grants = { code: 0, refresh: 0 }
+  const mint = (kind) => { const v = `secret-${kind}:aspen${base.replace(/\W/g, '_')}_${randomUUID()}`; issued.push(v); return v }
+  const pair = () => { const a = mint('access'); const r = mint('refresh'); access.set(a, 0); live.add(r); return { access_token: a, token_type: 'Bearer', expires_in: 3600, refresh_token: r } }
   let clock = Date.parse('2026-05-01T00:00:00.000Z')
   const fieldsOf = (obj) => [...SYSTEM, ...objects[obj]]
   const server = createServer(async (req, res) => {
     let raw = ''
     for await (const c of req) raw += c
-    const body = raw ? JSON.parse(raw) : null
-    const path = new URL(req.url, 'http://x').pathname
+    const form = /x-www-form-urlencoded/.test(req.headers['content-type'] ?? '')
+    const body = !raw ? null : form ? Object.fromEntries(new URLSearchParams(raw)) : JSON.parse(raw)
+    const url = new URL(req.url, 'http://x')
+    const path = url.pathname
+    const origin = `http://${req.headers.host}`
     const send = (status, obj) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
     const fail = (detail, status = 200) => send(status, { status: 'FAILURE', failures: [{ error_type: 'INVALID_DATA', detail, display_detail: detail }] })
+
+    if (path === '/.well-known/oauth-protected-resource') return send(200, { resource: origin, authorization_servers: [origin] })
+    if (path === '/.well-known/oauth-authorization-server') {
+      return send(200, { issuer: origin, authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${origin}/oauth/token`, revocation_endpoint: `${origin}/oauth/revoke`, code_challenge_methods_supported: ['S256'] })
+    }
+    if (path === '/oauth/authorize') {
+      const q = Object.fromEntries(url.searchParams)
+      const redirect = /^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback$/.test(q.redirect_uri ?? '')
+      if (q.response_type !== 'code' || q.client_id !== 'aspen-cli' || q.code_challenge_method !== 'S256' || !q.code_challenge || !q.state || q.resource !== origin || !redirect) return send(400, { error: 'invalid_request' })
+      const code = mint('code')
+      codes.set(code, { challenge: q.code_challenge, redirect: q.redirect_uri })
+      res.writeHead(303, { location: `${q.redirect_uri}?${new URLSearchParams({ code, state: q.state, iss: origin })}` })
+      return res.end()
+    }
+    if (path === '/oauth/token') {
+      if (body?.client_id !== 'aspen-cli' || body?.resource !== origin) return send(400, { error: 'invalid_request' })
+      if (body.grant_type === 'authorization_code') {
+        const c = codes.get(body.code)
+        codes.delete(body.code)
+        if (!c || c.redirect !== body.redirect_uri || createHash('sha256').update(body.code_verifier ?? '').digest('base64url') !== c.challenge) return send(400, { error: 'invalid_grant' })
+        grants.code++
+        return send(200, pair())
+      }
+      if (body.grant_type === 'refresh_token') {
+        if (!live.delete(body.refresh_token)) return send(400, { error: 'invalid_grant' })
+        access.clear() // the previous access token is refused once refreshed
+        grants.refresh++
+        return send(200, pair())
+      }
+      return send(400, { error: 'unsupported_grant_type' })
+    }
+    if (path === '/oauth/revoke') {
+      if (!live.delete(body?.token)) return send(400, { error: 'unsupported_token_type' })
+      return send(200, {})
+    }
+
     if (!path.startsWith(base + '/api/v24.3/')) return send(404, { failures: [{ error_type: 'NOT_FOUND' }] })
     const route = path.slice((base + '/api/v24.3').length)
     calls.push({ method: req.method, route, body })
-    if (req.headers.authorization !== `Bearer ${token}`) return send(401, { failures: [{ error_type: 'INVALID_SESSION_ID', detail: 'Invalid session' }] })
+    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
+    const uses = access.get(token)
+    if (uses === undefined || uses >= expireAfter) { access.delete(token); return send(401, { failures: [{ error_type: 'INVALID_SESSION_ID', detail: 'Invalid session' }] }) }
+    access.set(token, uses + 1)
 
     if (route === '/describe/identifiers/object_p') {
       return send(200, { status: 'SUCCESS', overview: { size: Object.keys(objects).length, has_more_rows: false }, data: Object.keys(objects).map(name => ({ name, label: name, 'object-type': null })) })
@@ -111,7 +162,7 @@ async function mockInstance ({ base, token, objects, picklists, records, failCre
           if (v === null) continue
           if (f.type === 'datetime' && !DATETIME.test(v)) return rowFail(`${k}: not a valid Datetime`)
           if (f.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return rowFail(`${k}: not a valid Date`)
-          if (f.type === 'picklist' && !picklists[f.picklist].includes(v)) return rowFail(`${k}: not a picklist value`)
+          if (f.type === 'picklist' && f.picklist && !picklists[f.picklist].includes(v)) return rowFail(`${k}: not a picklist value`)
           if (f.type === 'id' && f.relationship && !(records[f.relationship] ?? []).some(r => r.id_p === v)) return rowFail(`${k}: no such ${f.relationship}`)
         }
         const merged = { ...(existing ?? {}), ...row }
@@ -127,20 +178,20 @@ async function mockInstance ({ base, token, objects, picklists, records, failCre
     send(404, { failures: [{ error_type: 'NOT_FOUND' }] })
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  return { url: `http://127.0.0.1:${server.address().port}${base}/`, calls, records, close: () => server.close() }
+  return { url: `http://127.0.0.1:${server.address().port}${base}/`, calls, records, issued, live, grants, close: () => server.close() }
 }
 
 // ---- the two instances: legacy company_c/person_c → account_p/contact_p
 
 const SOURCE_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
-  company_c: [text('name_c', { required: true }), picklist('sector_c'), lookup('parent_c', 'company_c'), lookup('owner_p', 'user_p'), text('note_c', { long: true }), number('score_c')],
+  company_c: [text('name_c', { required: true }), picklist('sector_c'), lookup('parent_c', 'company_c'), lookup('owner_p', 'user_p'), text('note_c', { long: true }), number('score_c'), objectType('otype_c')],
   person_c: [text('first_c'), text('last_c'), text('email_c'), lookup('company_c', 'company_c'), date('born_c'), datetime('met_c')],
   project_c: [text('name_c'), picklist('stage_c'), lookup('company_c', 'company_c'), number('budget_c'), text('extra_c')]
 }
 const TARGET_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
-  account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true })],
+  account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p')],
   contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c')],
   project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true })]
 }
@@ -149,7 +200,7 @@ const sourceRecords = () => ({
   user_p: [{ id_p: 'u1', ct_p: '2020-01-01T00:00:00.000Z', email_p: 'a@x.com' }, { id_p: 'u2', ct_p: '2020-01-01T00:00:01.000Z', email_p: 'b@x.com' }],
   company_c: [
     { id_p: 'c2', ct_p: '2021-01-01T00:00:00.000Z', name_c: 'Beta', sector_c: 'bank_c', parent_c: 'c1', owner_p: 'u2', note_c: null, score_c: '7' },
-    { id_p: 'c1', ct_p: '2021-01-02T00:00:00.000Z', name_c: 'Acme', sector_c: 'tech_c', parent_c: null, owner_p: 'u1', note_c: LONG_NOTE, score_c: '9' },
+    { id_p: 'c1', ct_p: '2021-01-02T00:00:00.000Z', name_c: 'Acme', sector_c: 'tech_c', parent_c: null, owner_p: 'u1', note_c: LONG_NOTE, score_c: '9', otype_c: 'account_p.customer_c' },
     { id_p: 'c3', ct_p: '2021-01-03T00:00:00.000Z', name_c: 'Gamma', sector_c: 'farm_c', parent_c: 'c2', owner_p: null, note_c: 'short', score_c: null }
   ],
   person_c: [
@@ -182,31 +233,41 @@ const SETTLED = [
   ] }
 ]
 
-async function setup (t, { target = targetRecords(), failCreate } = {}) {
+// The browser: `open` (macOS) and `xdg-open` (Linux) on PATH that follow the authorize redirect
+// back to the script's callback, the way a signed-in user's browser does.
+function browser (home) {
+  const bin = join(home, 'bin')
+  mkdirSync(bin)
+  const js = join(bin, 'browser.mjs')
+  writeFileSync(js, "const r = await fetch(process.argv[2], { redirect: 'manual' }); const to = r.headers.get('location'); if (to) await fetch(to)\n")
+  for (const name of ['open', 'xdg-open']) {
+    writeFileSync(join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`)
+    chmodSync(join(bin, name), 0o755)
+  }
+  return bin
+}
+
+async function setup (t, { target = targetRecords(), failCreate, expireAfter } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
-  const src = await mockInstance({ base: '/acme/legacy', token: SRC_TOKEN, objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords() })
-  const tgt = await mockInstance({ base: '/acme/prod', token: TGT_TOKEN, objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'] }, records: target, failCreate: (o) => failCreate?.(o) ?? false })
+  const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords() })
+  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, expireAfter })
   t.after(() => { src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
   writeFileSync(join(dir, '.aspen', 'config.toml'), `instance = "${tgt.url}"\n`)
-  mkdirSync(join(home, 'tokens'))
-  for (const [name, token] of [['legacy', SRC_TOKEN], ['prod', TGT_TOKEN]]) {
-    writeFileSync(join(home, 'tokens', name), token + '\n')
-    chmodSync(join(home, 'tokens', name), 0o600)
-  }
+  const PATH = browser(home) + delimiter + process.env.PATH
   const ws = join(dir, 'data', 'migrations', 'legacy')
-  // Every run is checked: no token in anything the script prints.
+  // Every run is checked: no code or token in anything the script prints.
   const run = (...args) => new Promise((resolve) => {
-    const p = spawn(process.execPath, [script, ...args], { cwd: dir, env: { ...process.env, HOME: home, USERPROFILE: home } })
+    const p = spawn(process.execPath, [script, ...args], { cwd: dir, env: { ...process.env, HOME: home, USERPROFILE: home, PATH } })
     let stdout = ''; let stderr = ''
     p.stdout.on('data', d => { stdout += d }); p.stderr.on('data', d => { stderr += d })
     p.on('close', (status) => {
-      for (const tok of [SRC_TOKEN, TGT_TOKEN]) assert.ok(!(stdout + stderr).includes(tok), 'a token was printed')
+      for (const tok of [...src.issued, ...tgt.issued]) assert.ok(!(stdout + stderr).includes(tok), 'a code or token was printed')
       resolve({ status, stdout, stderr })
     })
   })
-  const init = () => run('init', ws, '--source', src.url, '--source-token', '~/tokens/legacy', '--target', tgt.url, '--target-token', '~/tokens/prod')
+  const init = () => run('init', ws, '--source', src.url, '--target', tgt.url)
   const mapping = () => JSON.parse(readFileSync(join(ws, 'mapping.json'), 'utf8'))
   const settle = (objects = SETTLED) => writeFileSync(join(ws, 'mapping.json'), JSON.stringify({ ...mapping(), objects }, null, 2))
   const ready = async (objects) => {
@@ -222,52 +283,47 @@ const writes = (inst) => inst.calls.filter(c => !(c.method === 'POST' && (c.rout
 const byName = (inst, obj, field, value) => inst.records[obj].find(r => r[field] === value)
 const lines = (file) => existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : []
 
-// ---- init: tokens and the target instance
+// ---- init and sign-in
 
 test('init writes the connections and a .gitignore for record data', async t => {
   const s = await setup(t)
   const r = await s.init()
   assert.equal(r.status, 0, r.stderr)
   const m = s.mapping()
-  assert.deepEqual(m.source, { url: s.src.url, tokenFile: '~/tokens/legacy' })
-  assert.deepEqual(m.target, { url: s.tgt.url, tokenFile: '~/tokens/prod' })
+  assert.deepEqual(m.source, { url: s.src.url })
+  assert.deepEqual(m.target, { url: s.tgt.url })
   assert.deepEqual(m.objects, [])
   const ignore = readFileSync(join(s.ws, '.gitignore'), 'utf8')
   for (const d of ['extract/', 'idmap/', 'errors/', 'schema/']) assert.ok(ignore.includes(d), d)
 })
 
-test('a token file others can read is refused, with the fix', async t => {
-  const s = await setup(t)
-  chmodSync(join(s.home, 'tokens', 'legacy'), 0o644)
-  const r = await s.init()
-  assert.equal(r.status, 2)
-  assert.match(r.stderr, /chmod 600/)
-})
-
-test('a token file inside the instance directory is refused', async t => {
-  const s = await setup(t)
-  const inside = join(s.dir, 'prod.token')
-  writeFileSync(inside, TGT_TOKEN); chmodSync(inside, 0o600)
-  const r = await s.run('init', s.ws, '--source', s.src.url, '--source-token', '~/tokens/legacy', '--target', s.tgt.url, '--target-token', inside)
-  assert.equal(r.status, 2)
-  assert.match(r.stderr, /outside the instance directory/)
-})
-
 test('a target that is not this directory\'s instance is refused', async t => {
   const s = await setup(t)
-  const r = await s.run('init', s.ws, '--source', s.src.url, '--source-token', '~/tokens/legacy', '--target', s.src.url, '--target-token', '~/tokens/prod')
+  const r = await s.run('init', s.ws, '--source', s.src.url, '--target', s.src.url)
   assert.equal(r.status, 2)
   assert.match(r.stderr, /config\.toml/)
 })
 
-test('a refused token names the instance and the file, never the token', async t => {
-  const s = await setup(t)
-  assert.equal((await s.init()).status, 0)
-  writeFileSync(join(s.home, 'tokens', 'legacy'), 'secret-token:aspen_WRONG')
-  const r = await s.run('describe', s.ws)
-  assert.equal(r.status, 2)
-  assert.match(r.stderr, /source.*refused/s)
-  assert.ok(!r.stderr.includes('aspen_WRONG'))
+test('a callback that does not carry this sign-in\'s state is refused', async t => {
+  const inst = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: {}, records: {} })
+  t.after(() => inst.close())
+  const forge = async (url) => {
+    const back = new URL(new URL(url).searchParams.get('redirect_uri'))
+    back.search = new URLSearchParams({ code: 'forged', state: 'not-this-one' }).toString()
+    await fetch(back).catch(() => {})
+  }
+  await assert.rejects(signIn(inst.url, { side: 'target', openBrowser: forge, log: () => {}, timeoutMs: 5000 }), /wrong state/)
+  assert.equal(inst.grants.code, 0, 'no token was issued')
+})
+
+test('an access token refused mid-load is refreshed, and the load finishes', async t => {
+  const s = await setup(t, { expireAfter: 3 })
+  await s.ready()
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.ok(s.tgt.grants.refresh > 0, 'the target token was refreshed')
+  assert.equal(s.tgt.records.account_p.length, 3)
+  assert.equal(s.tgt.records.contact_p.length, 3)
 })
 
 // ---- describe and draft
@@ -374,6 +430,16 @@ test('the dry run reports every error and writes nothing to the target', async t
   assert.ok(plan.indexOf('company_c') < plan.indexOf('person_c'), 'companies load before people')
   assert.ok(!plan.includes('Gamma'), 'record values stay out of the report')
   assert.equal(lines(join(s.ws, 'errors', 'company_c.jsonl')).length, 1)
+})
+
+test('a reference picklist, which names no list, is left for the instance to check', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects[1].fields.push({ target: 'otype_p', from: 'otype_c' })
+  await s.ready(objects)
+  const r = await s.run('load', s.ws)
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.equal(lines(join(s.ws, 'errors', 'company_c.jsonl')).length, 0)
 })
 
 // ---- load --run
@@ -484,13 +550,16 @@ test('verify passes after a load and catches a changed record', async t => {
   assert.match(readFileSync(join(s.ws, 'reports', 'verify.md'), 'utf8'), /first_name_p/)
 })
 
-test('no token is written into the workspace', async t => {
+test('no token is written into the workspace, and every refresh token is revoked', async t => {
   const s = await setup(t)
   await s.ready()
   await s.run('load', s.ws, '--run'); await s.run('verify', s.ws)
   const walk = (d) => readdirSync(d).flatMap(n => statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : [join(d, n)])
+  const issued = [...s.src.issued, ...s.tgt.issued]
+  assert.ok(issued.length > 0)
   for (const file of walk(s.ws)) {
     const body = readFileSync(file, 'utf8')
-    assert.ok(!body.includes(SRC_TOKEN) && !body.includes(TGT_TOKEN), `${file} holds a token`)
+    assert.ok(!issued.some(tok => body.includes(tok)), `${file} holds a token`)
   }
+  assert.equal(s.src.live.size + s.tgt.live.size, 0, 'a refresh token was left unrevoked')
 })
