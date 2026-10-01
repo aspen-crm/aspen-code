@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Copy records from a source Aspen instance into the target instance whose directory this runs
-// in, through the REST API. The aspen CLI has no data commands; this reads and writes records
-// with an API token per instance, kept in a file the user made. It never prints a token.
+// in, through the REST API. The aspen CLI has no data commands. Each command that reads or writes
+// an instance signs in to it through the browser (signin.mjs) and keeps the token in memory only:
+// nothing is stored, and no token is printed.
 //
-//   node migrate.mjs init <workspace> --source <url> --source-token <file> --target <url> --target-token <file>
-//   node migrate.mjs describe <workspace>              both schemas → schema/
+//   node migrate.mjs init <workspace> --source <url> --target <url>
+//   node migrate.mjs describe <workspace> [--side source|target]   schemas → schema/
 //   node migrate.mjs draft <workspace> --objects a,b   add source objects to mapping.json; gaps are todos
 //   node migrate.mjs extract <workspace>               source records → extract/
 //   node migrate.mjs load <workspace>                  dry run → reports/plan.md; writes nothing
@@ -20,13 +21,13 @@
 // AQL refuses `>` on id_p and caps OFFSET at 10000, so extract pages by created time (ct_p,
 // indexed): ORDER BY ct_p, id_p, moving a `ct_p >=` window forward before OFFSET runs out.
 //
-// Exit codes: 0 done; 1 rows failed, wait on a parent, or differ on verify; 2 bad invocation, or
-// the mapping, a token file or the instance is not ready.
+// Exit codes: 0 done; 1 rows failed, wait on a parent, or differ on verify; 2 bad invocation, the
+// mapping or the instance is not ready, or a sign-in failed.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { SignInError, signIn } from './signin.mjs'
 
 const API = '/api/v24.3'
 const PAGE = 1000 // AQL LIMIT cap
@@ -40,8 +41,8 @@ const IGNORED = ['extract/', 'idmap/', 'errors/', 'schema/']
 
 const HELP = `Copy records from a source Aspen instance into this directory's instance.
 
-  node migrate.mjs init <workspace> --source <url> --source-token <file> --target <url> --target-token <file>
-  node migrate.mjs describe <workspace>
+  node migrate.mjs init <workspace> --source <url> --target <url>
+  node migrate.mjs describe <workspace> [--side source|target]
   node migrate.mjs draft <workspace> --objects <source objects, comma-separated>
   node migrate.mjs extract <workspace>
   node migrate.mjs load <workspace>                     dry run: reports/plan.md, writes nothing
@@ -49,6 +50,9 @@ const HELP = `Copy records from a source Aspen instance into this directory's in
       --limit N   at most N new records per object (a pilot)
       --batch N   records per request (default ${DEFAULT_BATCH}, max ${MAX_BATCH})
   node migrate.mjs verify <workspace> [--sample N]
+
+Each command that reaches an instance signs in to it in the browser: describe to both (or the
+--side named), extract to the source, load and verify to the target. Nothing is stored.
 
 The mapping format is in mapping-format.md beside the skill.`
 
@@ -65,9 +69,6 @@ const readLines = (p) => existsSync(p) ? readFileSync(p, 'utf8').split('\n').fil
 const writeLines = (p, rows) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, rows.map((r) => JSON.stringify(r) + '\n').join('')) }
 const appendLines = (p, rows) => { if (rows.length) { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, rows.map((r) => JSON.stringify(r) + '\n').join('')) } }
 const writeText = (p, text) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, text) }
-const expand = (p) => p === '~' ? homedir() : /^~[/\\]/.test(p) ? join(homedir(), p.slice(2)) : p
-const real = (p) => { try { return realpathSync(p) } catch { return resolve(p) } }
-const inside = (p, dir) => { const r = relative(real(dir), real(p)); return r === '' || (!r.startsWith('..') && !isAbsolute(r)) }
 const sameUrl = (a, b) => String(a).trim().replace(/\/+$/, '').toLowerCase() === String(b).trim().replace(/\/+$/, '').toLowerCase()
 const failureText = (j) => (j?.failures ?? []).map((f) => f.display_detail || f.detail || [f.error_type, f.subtype].filter(Boolean).join('/')).join('; ')
 // Only ids and timestamps the API returned go into a query this script builds.
@@ -78,7 +79,7 @@ const writable = (o) => Object.entries(o.fields).filter(([n]) => !SYSTEM.has(n))
 const selectable = (o) => writable(o).filter(([, f]) => !(f.type === 'id' && f.subtype === 'file'))
 const column = ([name, f]) => f.type === 'text' && f.subtype === 'long' ? `longtext(${name}) ${name}` : name
 
-// ---- the workspace, the instance directory it sits in, and the token files
+// ---- the workspace and the instance directory it sits in
 
 function instanceRoot (start) {
   for (let d = resolve(start); ; d = dirname(d)) {
@@ -96,24 +97,15 @@ function workspace (arg) {
   return { dir, root: root.dir, instance: root.instance, path: (...p) => join(dir, ...p) }
 }
 
-function readToken (file, root, side) {
-  if (!file) throw new Stop(`no token file for the ${side}`)
-  const path = resolve(expand(file))
-  let st
-  try { st = statSync(path) } catch { throw new Stop(`the ${side} token file ${path} does not exist; the user creates it (see the instance-migration skill)`) }
-  if (!st.isFile()) throw new Stop(`the ${side} token file ${path} is not a file`)
-  if (process.platform !== 'win32' && (st.mode & 0o077)) throw new Stop(`the ${side} token file ${path} can be read by other users; ask the user to run: chmod 600 "${path}"`)
-  if (inside(path, root)) throw new Stop(`the ${side} token file ${path} is inside the instance directory; it must be kept outside the instance directory, where git cannot pick it up`)
-  const token = readFileSync(path, 'utf8').trim()
-  if (!token) throw new Stop(`the ${side} token file ${path} is empty`)
-  return token
-}
-
 function readMapping (ws) {
   const file = ws.path('mapping.json')
   if (!existsSync(file)) throw new Stop(`no ${file}; run init first`)
   const m = readJson(file)
   if (!sameUrl(m.target?.url, ws.instance)) throw new Stop(`mapping.json's target ${m.target?.url} is not this directory's instance (${ws.instance}, from .aspen/config.toml)`)
+  if (m.source?.tokenFile || m.target?.tokenFile) {
+    say("note: mapping.json's tokenFile is no longer used: each command signs in through the browser. The user can delete that file and revoke its API key.")
+    delete m.source?.tokenFile; delete m.target?.tokenFile
+  }
   m.objects ??= []
   return m
 }
@@ -126,12 +118,14 @@ const schema = (ws, side) => {
 
 // ---- the REST client. The source gets only `reader`; `write` exists for the target alone.
 
-function connect (conn, side, root) {
-  const token = readToken(conn.tokenFile, root, side)
+async function connect (conn, side) {
+  const session = await signIn(conn.url, { side, log: say })
   const base = String(conn.url).replace(/\/+$/, '') + API
-  const scrub = (s) => String(s).split(token).join('<token>')
+  const scrub = (s) => session.secrets().reduce((t, x) => t.split(x).join('<token>'), String(s))
   async function send (method, route, body, { retry = true } = {}) {
+    let renewed = false
     for (let attempt = 1; ; attempt++) {
+      const token = await session.bearer()
       let res
       try {
         res = await fetch(base + route, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body) })
@@ -144,8 +138,10 @@ function connect (conn, side, root) {
       const text = await res.text()
       let json = null
       try { json = JSON.parse(text) } catch {}
+      // A refused request was not applied, so a write is safe to send again once.
       if (res.status === 401 || res.status === 403 || json?.failures?.some((f) => f.error_type === 'INVALID_SESSION_ID')) {
-        throw new Stop(`the ${side} instance refused the token in ${conn.tokenFile} (HTTP ${res.status}); ask the user to create a new API key and save it there`)
+        if (!renewed) { renewed = true; await session.refreshed(); continue }
+        throw new Stop(`the ${side} instance (${conn.url}) refused the signed-in user (HTTP ${res.status}); sign in as a user who can ${side === 'target' ? 'read and write' : 'read'} the migrated objects`)
       }
       return { status: res.status, json, text: scrub(text.slice(0, 300)) }
     }
@@ -162,7 +158,7 @@ function connect (conn, side, root) {
     read,
     query: async (aql) => (await read('/data/query', { query: aql })).data ?? []
   }
-  return { reader, write: (method, object, rows) => send(method, `/data/${object}`, { data: rows }, { retry: false }) }
+  return { reader, write: (method, object, rows) => send(method, `/data/${object}`, { data: rows }, { retry: false }), close: session.close }
 }
 
 // ---- describe: objects, fields and picklist values, normalized
@@ -388,7 +384,8 @@ function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred })
     const out = format(v, f)
     if (out.error) { err(e.target, out.error, String(v)); continue }
     if (out.value === null && f.required) { err(e.target, 'required', 'blank'); continue }
-    if (f.type === 'picklist' && out.value != null && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
+    // A reference picklist (object type, security profile, field) names no list; the instance checks it.
+    if (f.type === 'picklist' && f.picklist && out.value != null && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
     values[e.target] = out.value
   }
   return { values, errors, wait }
@@ -654,12 +651,13 @@ async function verify (ws, m, tgt, { sample }) {
 
 // ---- commands
 
-const VALUED = ['--source', '--source-token', '--target', '--target-token', '--objects', '--limit', '--batch', '--sample']
+const VALUED = ['--source', '--target', '--side', '--objects', '--limit', '--batch', '--sample']
 function options (args) {
   const o = {}
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--run') o.run = true
+    else if (a === '--source-token' || a === '--target-token') throw new Stop(`${a}: token files are no longer used; each command signs in through the browser`)
     else if (VALUED.includes(a)) {
       if (args[i + 1] === undefined) throw new Stop(`${a} needs a value`)
       o[a.slice(2)] = args[++i]
@@ -683,21 +681,30 @@ export async function main (argv) {
 
   if (cmd === 'init') {
     if (existsSync(ws.path('mapping.json'))) throw new Stop(`${ws.path('mapping.json')} already exists; edit its "source" and "target" instead`)
-    for (const k of ['source', 'source-token', 'target', 'target-token']) if (!opts[k]) throw new Stop(`init needs --${k}`)
+    for (const k of ['source', 'target']) if (!opts[k]) throw new Stop(`init needs --${k}`)
     if (!sameUrl(opts.target, ws.instance)) throw new Stop(`the target ${opts.target} is not this directory's instance (${ws.instance}, from .aspen/config.toml)`)
     if (sameUrl(opts.source, opts.target)) throw new Stop('the source and the target are the same instance')
-    readToken(opts['source-token'], ws.root, 'source')
-    readToken(opts['target-token'], ws.root, 'target')
-    writeJson(ws.path('mapping.json'), { source: { url: opts.source, tokenFile: opts['source-token'] }, target: { url: opts.target, tokenFile: opts['target-token'] }, objects: [] })
+    writeJson(ws.path('mapping.json'), { source: { url: opts.source }, target: { url: opts.target }, objects: [] })
     writeText(ws.path('.gitignore'), '# record data stays out of git\n' + IGNORED.join('\n') + '\n')
     say(`workspace ready: ${ws.dir}\nnext: describe`)
     return 0
   }
 
   const m = readMapping(ws)
+  const opened = []
+  const open = async (side) => { const c = await connect(m[side], side); opened.push(c); return c }
+  try {
+    return await run(cmd, ws, m, opts, open)
+  } finally {
+    await Promise.allSettled(opened.map((c) => c.close()))
+  }
+}
+
+async function run (cmd, ws, m, opts, open) {
   if (cmd === 'describe') {
-    for (const side of ['source', 'target']) {
-      const { reader } = connect(m[side], side, ws.root)
+    if (opts.side && !['source', 'target'].includes(opts.side)) throw new Stop('--side is source or target')
+    for (const side of opts.side ? [opts.side] : ['source', 'target']) {
+      const { reader } = await open(side)
       const s = await describeInstance(reader)
       writeJson(ws.path('schema', `${side}.json`), { url: m[side].url, described: new Date().toISOString(), ...s })
       say(`${side}: ${Object.keys(s.objects).length} objects, ${Object.keys(s.picklists).length} picklists`)
@@ -723,7 +730,7 @@ export async function main (argv) {
   }
   if (cmd === 'extract') {
     const src = schema(ws, 'source')
-    const { reader } = connect(m.source, 'source', ws.root)
+    const { reader } = await open('source')
     for (const o of m.objects) {
       const S = src.objects[o.source]
       if (!S) throw new Stop(`${o.source} is not in schema/source.json; run describe again`)
@@ -740,7 +747,7 @@ export async function main (argv) {
     }
     return 0
   }
-  const target = connect(m.target, 'target', ws.root)
+  const target = await open('target')
   if (cmd === 'load') return load(ws, m, target, opts)
   return verify(ws, m, target, opts)
 }
@@ -748,6 +755,6 @@ export async function main (argv) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main(process.argv.slice(2)).then(
     (code) => { process.exitCode = code },
-    (e) => { console.error(e instanceof Stop ? e.message : (e?.stack ?? String(e))); process.exitCode = e instanceof Stop ? e.code : 1 }
+    (e) => { const known = e instanceof Stop || e instanceof SignInError; console.error(known ? e.message : (e?.stack ?? String(e))); process.exitCode = known ? e.code : 1 }
   )
 }

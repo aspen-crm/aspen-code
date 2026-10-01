@@ -11,7 +11,7 @@ and resumes. You and the user decide the mapping. Everything written to the targ
 permanent: nothing on Aspen deletes.
 
 The CLI has no data commands. The script uses the REST API (`/api/v24.3/data/*`,
-`/api/v24.3/describe/*`) with an API token per instance. There is no upsert, and a record's `id`
+`/api/v24.3/describe/*`), signing in to each instance through the browser. There is no upsert, and a record's `id`
 cannot be set, so every target record gets a new id; the id map in the workspace connects the
 two.
 
@@ -20,32 +20,29 @@ M="<this skill's dir>/scripts/migrate.mjs"
 node "$M" --help
 ```
 
-## 1. Tokens: the user creates them, you never see them
+## 1. Sign-in: the user signs in in the browser, you never see a token
 
-The user creates an API key on each instance in the Aspen app: profile menu → **API Keys**
-(`<instance URL>ui/user/api-keys`). The key is shown once. Use a user who can read every
-migrated object on the source and write it on the target.
+Each command that reaches an instance signs in to it the way `aspen login` does: a browser tab
+opens, the user signs in, and the token stays in the script's memory until the command ends.
+Nothing is saved: no API key, no token file, no keychain entry. `describe` signs in to both
+instances (`--side` names one), `extract` to the source, `load` and `verify` to the target.
+`init` and `draft` sign in to nothing.
 
-Have the user save each key to its own file outside the instance directory, readable only by
-them:
-
-```sh
-mkdir -p ~/.aspen-tokens && chmod 700 ~/.aspen-tokens
-# the user pastes the token into the file in their own editor or terminal, then:
-chmod 600 ~/.aspen-tokens/<name>
-```
-
-Any path outside the instance directory works, including files the user already has. You may run
-`chmod` on them; that does not read them. You pass the **path**. Never open, print, copy or ask
-for a token. The script refuses a token file that others can read or that sits inside the
-instance directory, and it never prints the token.
+- Run those commands in the background; each waits for the user. Say which instance's tab
+  opened and which account to use: on the source, one that can read every migrated object; on
+  the target, one that can write them. If no tab opened, give the user the URL the script
+  printed. It holds no secret.
+- The machine must reach both instances (VPN), and the browser must run on this machine: the
+  sign-in comes back to `127.0.0.1`.
+- Never ask for an API key or a token, and never keep one between commands. Don't run
+  `aspen login` for a migration: the CLI's login stays on the target directory's instance.
 
 ## 2. Start the workspace
 
 From the target instance directory, with `aspen doctor` clean (`using-aspen`):
 
 ```sh
-node "$M" init data/migrations/<source-name> --source <url> --source-token <file> --target <url> --target-token <file>
+node "$M" init data/migrations/<source-name> --source <url> --target <url>
 node "$M" describe data/migrations/<source-name>
 node "$M" draft data/migrations/<source-name> --objects company_c,contact_p,opportunity_p
 ```
@@ -72,8 +69,8 @@ Ask one object at a time. Don't guess a value mapping, a default or a key.
 | No `key` | Which field identifies the same record on both sides? | Without a key, running a second migration from another source, or reloading after a data change, can duplicate records. A key that repeats on the source, such as a company name, would merge records; the dry run reports each repeat as an error. |
 
 **Creating a target object or field** follows the normal loop: `lean-data-model` →
-`model-first` → `metadata` → `build-and-deploy`. Then run `describe` again so the mapping sees
-it.
+`model-first` → `metadata` → `build-and-deploy`. Then run `describe --side target` again so the
+mapping sees it.
 
 Tell the user what cannot move: the created and modified dates and users (system fields).
 Record history, files and the activity feed are not migrated either. Add a custom field for
@@ -140,10 +137,10 @@ The workspace's own `.gitignore` keeps record data
 
 | Thought | Reality |
 |---|---|
-| "I'll `cat` the token file to check it" | Never. `describe` fails with a clear message if the token is wrong. |
+| "I'll ask for an API key, or keep the token for the next command" | Never. Each command signs in through the browser and keeps nothing. |
 | "I'll upsert on the legacy id" | There is no upsert. The id map and `key` make a re-run safe. |
 | "I'll add a `legacy_id_c` field to every object for traceability" | The id map already records it, and a field is permanent. Add one only if the user needs to see the source id on the record. |
 | "The sector values look obvious; I'll map them" | Ask. A wrong map writes permanent records. |
 | "I'll skip the pilot, they're in a hurry" | A bad full load cannot be deleted. The pilot is 20 rows. |
 | "The load failed, so I'll clear the target and reload" | Nothing deletes. Fix the mapping and run again: the id map skips rows already loaded. |
-| "I'll `aspen login` to the source to read it" | The source is read through its token; stay in the target directory. |
+| "I'll `aspen login` to the source to read it" | The script signs in to the source itself; stay in the target directory. |

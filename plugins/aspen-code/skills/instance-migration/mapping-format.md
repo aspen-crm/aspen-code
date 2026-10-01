@@ -6,8 +6,8 @@ left.
 
 ```json
 {
-  "source": { "url": "https://legacy.example.com/acme/legacy/", "tokenFile": "~/.aspen-tokens/legacy" },
-  "target": { "url": "https://aspen.example.com/acme/prod/", "tokenFile": "~/.aspen-tokens/prod" },
+  "source": { "url": "https://legacy.example.com/acme/legacy/" },
+  "target": { "url": "https://aspen.example.com/acme/prod/" },
   "objects": [
     {
       "source": "company_c",

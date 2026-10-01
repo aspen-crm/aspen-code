@@ -13,8 +13,8 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **Never teach the Builder-era CLI** (`metacode/`, `.aspen/bin/aspen` in the folder, `./ac
   validate`, `aspen download`, API-key login). `scripts/validate.mjs` fails on those.
 - **The model never handles a credential.** OAuth login is handed to the user; no `--api-key`.
-  The one API-key path is `instance-migration`. The user saves each key to a `chmod 600` file
-  outside the instance directory, and the script reads it. The model passes only the path.
+  `instance-migration` signs in through the browser for each command (`scripts/signin.mjs`); the
+  token lives only in that process's memory and is never written.
 - **Every skill is routed from `using-aspen`**, and its frontmatter `description` says *when* to
   use it. Keep bodies procedures, not essays.
 - **Agents are read-only** — never give `schema-explorer` or `metadata-reviewer` Write/Edit.
