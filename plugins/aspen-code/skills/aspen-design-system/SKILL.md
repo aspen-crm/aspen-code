@@ -357,6 +357,27 @@ Two rules that are easy to miss:
   `closeButton: true`, so their header carries a flat `IconButton` with a 24px `Close`. Leave it
   out and the panel is missing a control the platform always shows.
 
+## Make the silent failures build errors
+
+The two failures below — a class the build never generated, a token name that does not exist —
+are the ones that cost the most, because nothing reports them. `harvest/` beside this file
+turns them into build errors:
+
+```sh
+# 1. evaluate harvest/collect.js on a few signed-in pages, save each result
+node harvest/write.mjs --release <release> --out typescript/src/generated capture*.json
+node harvest/check.mjs --generated typescript/src/generated/design-system.ts typescript/src
+```
+
+It harvests the instance's own class and token vocabulary into a versioned module and diffs
+the source tree against it. Nothing platform-side is copied; each instance harvests what it
+already serves to its operator, stamped with the release so an upgrade produces a readable
+diff. See `harvest/README.md` for the limits — in particular, harvested *recipes* are
+observations of rendered components, not the design system's source `cva()` configs.
+
+Run it before the browser checks below: it catches things a runtime audit structurally cannot,
+such as classes on a branch that did not render or markup outside the scanned subtree.
+
 ## Verifying — the part that actually matters
 
 The build does not type-check, Tailwind class names are never validated, and token names are
