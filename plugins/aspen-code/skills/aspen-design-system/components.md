@@ -1321,10 +1321,118 @@ Input, List, Modal, SidePanel, TextArea, Badge, SegmentedButtons, Button, Popove
 CursorPagination, Separator.
 
 The rest were extracted mechanically, and for a compound component the extractor sometimes
-captured a **part** rather than the frame — a chevron, a caption, a cell. If an entry's classes
-do not look like the outer container of the thing you are building (no `border`, no
-`bg-surface-*`, no layout), treat it as a part, and build the frame from a confirmed entry of
-the same family above.
+captured a **part** rather than the frame. If an entry's classes do not look like the outer
+container of the thing you are building (no `border`, no `bg-surface-*`, no layout), treat it
+as a part, and build the frame from a confirmed entry of the same family above.
+
+### Entries confirmed wrong
+
+Found by building all 71 and rendering them against the running platform. Each of these is a
+part, not the frame — the frame to use is given:
+
+| Entry | What the recipe actually is | Build the frame as |
+|---|---|---|
+| `Form` | the **ActionFooter** (`flex items-center gap-inner-md`, layout / divider / surface) | a `<form>` stacking fields in a column; the footer recipe is a real `ActionFooter` |
+| `NumberInput` | one **stepper button** (`size-6 justify-center text-primary`) | `InputGroup` + input + two steppers |
+| `Search` | the **combobox field wrapper** (`group/combobox flex flex-col`) | `InputGroup` + magnifier + input + clear |
+| `Select` | the **clear button** (`absolute top-1/2 right-11 … size-6`) | `InputGroup` as the trigger, plus the popover/listbox/option recipes |
+| `Table` | the **cell text clamp** (`line-clamp-2`) | `w-full table-fixed border-separate border-spacing-0 text-body-small`, `th` `h-10 … uppercase` |
+| `NavBar` | the **dropdown menu content** it can open | a `h-16` row: `border-b border-subtle bg-surface-default px-inner-md` |
+| `Timeline` | the **rail segment** (`absolute start-0 flex w-8 justify-center`) | an `<ol>` of nodes, each with rail, marker and content |
+| `Radio` / `RadioGroup` | a **truncated extraction** — the literal text `flex flex-col gap-inner-md t overflow.` | no usable recipe; radio has no Tailwind recipe at all (see tokens below) |
+
+## Token families read off the live page
+
+Verified by rendering every component and reporting each `--ap-*` that resolved to the empty
+string. All three of these would have been guessed wrong, and a wrong name fails **silently**:
+`var()` falls back and nothing errors.
+
+| What you want | The family is **not** | It is |
+|---|---|---|
+| a radio's ring and dot | `--ap-comp-radio-*` (that is only label / description / caption text) | **`--ap-comp-radiobase-*`** — `size`, `ring-color-{default,hover,disabled}`, `selected-ring-color-*`, `selected-dot-color-*`, `shadow-focus` |
+| a switch's track and thumb | the checkbox's `unselected-*` / `selected-*` shape | **`--ap-comp-switch-*`**, split by on/off **and** track/thumb: `off-track-bg-{default,focus,disabled}`, `on-track-bg-*`, `off-thumb-bg-*`, `on-thumb-bg-*`, `track-{width,padding,radius}`, `thumb-{size,radius}`, `shadow-focus` |
+| a corner radius | `--ap-sem-border-radius-*` | **`--ap-sem-radius-*`** — `none` `xs` `sm` `md` `lg` `xl` `full` |
+
+The same `*base` split that catches radio catches the segmented control (`segmentbase`). When
+a component has a text half and a control half, the control is usually `<name>base`.
+
+## Classes the platform's build never generated
+
+Only utilities Tailwind already emitted for the platform's own UI exist in the adopted sheet.
+These all look completely ordinary, resolve to nothing, and produce no error — the component
+simply renders unstyled. Every one below was caught by rendering the gallery and diffing used
+classes against defined ones:
+
+```
+grid-cols-7   xl:grid-cols-2   border-b-2   w-px      ps-10        mb-1
+min-w-24      left-1/2         -translate-x-1/2       bottom-full  top-inner-sm
+mr-inner-sm   bg-subtle        disabled:text-disabled has-[:disabled]:text-disabled
+```
+
+Arbitrary variants you invent (`[&[data-shown]]:flex`) are never generated either. Write these
+as real CSS in a sheet you adopt, not as classes.
+
+**Probe before relying on one**, the same way you probe a token:
+
+```js
+const defined = new Set();
+const walk = (rules) => { for (const r of rules) {
+    if (r.selectorText) for (const m of r.selectorText.matchAll(/\.((?:[\w-]|\\.)+)/g))
+        defined.add(m[1].replace(/\\(.)/g, '$1'));
+    if (r.cssRules) walk(r.cssRules);
+} };
+for (const s of document.styleSheets) { try { walk(s.cssRules); } catch {} }
+defined.has('grid-cols-7');   // false
+```
+
+Note `group/<name>` markers legitimately have no rule of their own — exclude them.
+
+## Make the platform's own `data-disabled:` rules fire on a native element
+
+Nearly every recipe here keys its disabled styling off `data-disabled` or `aria-disabled`,
+attributes React Aria sets and a native element never does. The obvious move is to swap them
+for `disabled:` — but `disabled:text-disabled` is **not generated** (above), so that silently
+produces nothing.
+
+Set the attribute yourself instead, and keep the platform's recipe verbatim:
+
+```tsx
+<button data-disabled={disabled || undefined} disabled={disabled} className={buttonClass(variant)}>
+```
+
+The design system's own rule then paints a native control, so what renders is the real styling
+rather than a lookalike.
+
+## Overlays portalled into the shadow root need an explicit anchor
+
+A popover portalled into the shadow root has no useful containing block. `position: absolute`
+with no coordinates drops it at its static position at the **end of the shadow tree** —
+thousands of pixels from its trigger — while still reporting itself open, `aria-expanded` and
+all. It reads exactly like a popover that failed to open.
+
+Measure the trigger when it opens and place the popover with `position: fixed`:
+
+```ts
+const box = trigger.getBoundingClientRect();
+setRect({ top: box.bottom, left: box.left, width: box.width });
+// style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width }}
+```
+
+## Forcing `:hover` and `:focus-visible` from markup
+
+To show a state without the pointer — a gallery, a visual diff — read the platform's own rules
+out of the adopted sheet and re-emit them against an attribute selector. Two hazards, both
+silent:
+
+- Tailwind escapes the colon **inside** the class name, so `[&:hover]:bg-x` compiles to
+  `.\[\&\:hover\]\:bg-x:hover` — the characters `:hover` appear twice and only the last is
+  the pseudo-class. Match with a negative lookbehind: `/(?<!\\):hover\b/g`.
+- `:focus` is a prefix of `:focus-visible` and `\b` matches before the hyphen, so a `:focus`
+  pass running first yields `[data-force-focus]-visible`. Rewrite `:focus-visible` first.
+
+Recurse into `@media (hover: hover)`, which wraps most hover utilities. **Validate the rewrite
+once against a real mouse** — force the state, read computed styles, hover the same control for
+real, and compare — or every state the page shows is unproven.
 
 ## What this catalogue cannot give you
 
