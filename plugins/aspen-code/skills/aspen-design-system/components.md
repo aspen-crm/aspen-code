@@ -1341,6 +1341,65 @@ part, not the frame — the frame to use is given:
 | `Timeline` | the **rail segment** (`absolute start-0 flex w-8 justify-center`) | an `<ol>` of nodes, each with rail, marker and content |
 | `Radio` / `RadioGroup` | a **truncated extraction** — the literal text `flex flex-col gap-inner-md t overflow.` | no usable recipe; radio has no Tailwind recipe at all (see tokens below) |
 
+## `Input` is an `InputGroup` around a bare control
+
+Caught by diffing against `/ui/objects/account_p/create`. The entry above has `Input` adding
+`block h-12 w-full min-w-0 px-inner-sm` to the field surface — the border on the `<input>`.
+**The platform does not render it that way.** Its `<input>` is 24px tall with no border, no
+background and no padding:
+
+```html
+<div data-slot="input-group" class="group/input-group flex min-w-0 cursor-text items-center
+     gap-inner-xs rounded-md border border-default bg-surface-default …">   <!-- the surface -->
+  <input data-slot="field-control" class="min-w-0 flex-1 bg-transparent text-body
+         placeholder:text-placeholder disabled:cursor-not-allowed
+         disabled:placeholder:text-disabled">
+</div>
+```
+
+`TextArea`, by contrast, really does carry the surface itself — so the two cannot be assumed
+to follow the same shape, and each has to be checked.
+
+Note also `placeholder:text-placeholder` (not `placeholder-placeholder`), and that
+`disabled:cursor-not-allowed` and `disabled:placeholder:text-disabled` **are** generated even
+though `disabled:text-disabled` is not. Probe each one.
+
+## A date field's trigger is not an `IconButton`
+
+On `/ui/objects/opportunity_p/create` the control that opens the calendar is:
+
+```
+inline-flex size-8 shrink-0 items-center justify-center rounded-md text-primary
+transition-colors data-hovered:bg-surface-hover data-focus-visible:focus-ring
+group-data-disabled/input-group:text-disabled ms-auto
+```
+
+`size-8` with a `size-6` glyph, pushed over with `ms-auto`, and taking its disabled state from
+the enclosing input group rather than its own attribute — not the flat `IconButton` (`size-6`)
+it resembles. The surrounding slots are `date-picker` → `date-field-surface` (which still
+carries the `group/input-group` class) → `date-segments`.
+
+Each segment must be a **direct child** of the segments row. Wrapping one makes the wrapper the
+flex item and leaves the segment inline, computing `height: auto` instead of 24px.
+
+## Set `line-height` on the root, not just the font
+
+`SKILL.md` step 2 says to set the root font because preflight puts it on `html`, which a shadow
+root does not have. **`line-height` has exactly the same problem and is far easier to miss**,
+because the page still looks plausible without it.
+
+```ts
+export const rootStyle: CSSProperties = {
+    fontFamily: 'var(--ap-sem-font-family-body)',
+    lineHeight: 'var(--ap-sem-line-height-body)',   // 24px — preflight puts this on html too
+};
+```
+
+Without it, every container that has no `text-*` class of its own — an `InputGroup`, a
+date-field surface, an icon trigger — inherits `normal` and comes out a different height from
+the platform's. Controls carrying their own `text-body` are unaffected, which is what makes it
+hard to spot: most of the page is right.
+
 ## Token families read off the live page
 
 Verified by rendering every component and reporting each `--ap-*` that resolved to the empty
