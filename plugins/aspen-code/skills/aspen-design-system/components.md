@@ -1400,6 +1400,45 @@ date-field surface, an icon trigger — inherits `normal` and comes out a differ
 the platform's. Controls carrying their own `text-body` are unaffected, which is what makes it
 hard to spot: most of the page is right.
 
+## Sweep a page for markers rather than hunting one control at a time
+
+The design system marks its own components with `data-slot` attributes and `group/<name>`
+scope classes. Both are reliable — they exist only because the component declared them — so a
+stock page can be swept for all of them at once and will report exactly which components it
+renders:
+
+```js
+const groups = new Set(), slots = new Set();
+for (const el of document.querySelectorAll('*')) {
+    for (const c of el.classList) if (c.startsWith('group/')) groups.add(c);
+    const s = el.getAttribute('data-slot'); if (s) slots.add(s);
+}
+```
+
+This also corrects guesses. `Search`'s real marker is **`group/search-field`**, not
+`group/combobox`; a nav bar publishes `navbar`, `navbar-row`, `navbar-item`, `navbar-leading`,
+`navbar-menu`, `navbar-separator`; a date field publishes `date-picker`, `date-field-surface`
+and `date-segments`.
+
+**Watch for the empty state.** On an instance with no records, a list view still renders one
+`<td>` — `p-inner-xl text-center text-body-large text-tertiary`. Measuring it as a table cell
+gives a reference that is wrong *and* passes, which is worse than having none. Check the
+classes of anything you harvest before trusting it.
+
+## NavBar is padding-driven, and its row is part of its height
+
+```
+nav:         flex items-center gap-inner-xs border-b border-b-default bg-surface-default
+             px-inner-md py-inner-xs
+navbar-row:  -m-inner-2xs min-w-0 grow overflow-hidden p-inner-2xs
+link:        the Link recipe (rounded-sm, text-interactive) plus px-inner-sm py-inner-2xs
+```
+
+48.5px, not 64px. There is **no height class anywhere** — the bar's height comes from its own
+`py-inner-xs`, the row's `p-inner-2xs`, and the link's line box. Reproducing the `<nav>`
+classes alone and adding `h-16` gets the look roughly right and the height wrong by 15px, and
+omitting the row wrapper leaves it 4px short.
+
 ## Token families read off the live page
 
 Verified by rendering every component and reporting each `--ap-*` that resolved to the empty
