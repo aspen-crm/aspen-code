@@ -2,7 +2,7 @@
   "name": "aspen-code",
   "displayName": "Aspen Code",
   "description": "Build on an Aspen instance with the aspen CLI: install it, sign in with OAuth, author metadata and Rust triggers, validate offline, deploy through the check-in chain, and verify.",
-  "version": "0.0.4",
+  "version": "0.0.1",
   "author": {
     "name": "Aspen CRM"
   },
