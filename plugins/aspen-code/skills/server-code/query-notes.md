@@ -22,6 +22,10 @@ API. This file is only what real sessions hit that those pages leave out (observ
 - **A query returns at most 100 rows, whatever the `LIMIT`.** Page with `LIMIT n OFFSET m` and a
   deterministic `ORDER BY` (add `id_p` to break ties); `SKIP` does not exist. Anything that
   totals or filters a full result must consume every page.
+- **A long text field (`text`/`long`) comes back cut at 255 characters**, silently, when selected
+  plainly. Select `LONGTEXT(notes_c) AS notes_c` for the full value; the alias is required, and
+  it works through a dot-walk (`LONGTEXT(owner_c.bio_p) AS bio_c`). `LONGTEXT` on any other field
+  is rejected.
 - **Checkbox and number literals are unquoted** (`is_active_c = true`); ids and text are quoted.
 - `IN ('id1','id2',…)` works; chunk a computed id set at 100.
 - **`CURRENT_USER()` compares only against a user-reference field** (`owner_p`,
