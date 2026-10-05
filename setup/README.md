@@ -79,7 +79,7 @@ removing a marketplace uninstalls everything from it.
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.2 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.1 or
 later, enabled.
 
 Already installed? Update it: `claude plugin update aspen-code@aspen-code` (Claude Code) or
