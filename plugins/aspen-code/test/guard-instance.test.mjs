@@ -76,6 +76,15 @@ test('a folder-local Builder-era CLI is refused, by bare name or by path', t => 
   assert.deepEqual(m.run(`"${m.home}/.aspen/bin/aspen" status`), { hard: [], confirm: [] })
 })
 
+test('aspenup\'s CLI by ~ or $HOME is allowed; a relative path resolves after the cd', t => {
+  const m = machine(t)
+  for (const bin of ['~/.aspen/bin/aspen', '$HOME/.aspen/bin/aspen', '"${HOME}/.aspen/bin/aspen"']) {
+    assert.deepEqual(m.run(`cd "${m.dev}" && ${bin} doctor`), { hard: [], confirm: [] }, bin)
+  }
+  assert.match(m.run(`cd "${m.old}" && ./.aspen/bin/aspen compile`).hard[0], /folder-local/)
+  assert.match(m.run('.aspen/bin/aspen compile', m.old).hard[0], /folder-local/)
+})
+
 test('login is refused, logout asks', t => {
   const m = machine(t)
   assert.match(m.run(`aspen login -i ${A}`).hard[0], /user's to run/)

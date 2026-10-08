@@ -55,7 +55,11 @@ export function segments (command) {
   return out
 }
 
-const expand = (p, home) => p === '~' ? home : p.startsWith('~/') ? join(home, p.slice(2)) : p
+// `~`, `$HOME` and `${HOME}` as the shell would expand them at the start of a word.
+const expand = (p, home) => {
+  const x = p.replace(/^\$(HOME\b|\{HOME\})/, '~')
+  return x === '~' ? home : /^~[\\/]/.test(x) ? join(home, x.slice(2)) : x
+}
 const at = (base, p, home) => { const x = expand(p, home); return isAbsolute(x) ? x : resolve(base, x) }
 
 // Each aspen invocation in the command: which binary word, the subcommand, and the folder it
@@ -85,7 +89,9 @@ export function invocations (command, cwd, home = homedir()) {
       const value = args[d].includes('=') ? args[d].split('=').slice(1).join('=') : args[d + 1]
       if (value) dir = at(here, value, home)
     }
-    found.push({ binary: head, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed })
+    // A path to the binary resolves where the command runs, after any `cd`.
+    const path = /[\\/]/.test(head) ? at(here, head, home) : null
+    found.push({ binary: head, path, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed })
   }
   return found
 }
@@ -113,8 +119,8 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
     const verb = [inv.command, inv.command === 'move' ? inv.sub : ''].filter(Boolean).join(' ')
 
     // 1. The binary.
-    const explicit = inv.binary.includes('/') || inv.binary.includes('\\')
-    if (explicit && real(inv.binary) !== real(proxy) && /[\\/]\.aspen[\\/]bin[\\/]aspen(\.exe)?$/i.test(inv.binary) && !real(inv.binary).startsWith(real(aspenHome))) {
+    const explicit = inv.path !== null
+    if (explicit && real(inv.path) !== real(proxy) && /[\\/]\.aspen[\\/]bin[\\/]aspen(\.exe)?$/i.test(inv.path) && !real(inv.path).startsWith(real(aspenHome))) {
       hard.push(`\`${inv.binary}\` is a folder-local, Builder-era CLI, not the aspenup-managed aspen this plugin drives. Run \`${proxy} ${verb}\` instead.`)
       continue
     }
