@@ -318,6 +318,105 @@ export function findComponentMismatches (source) {
   return findings
 }
 
+// ---- native controls the browser draws ---------------------------------------------
+//
+// The fourth failure, and the one that makes a page read as generic at a glance. A `<select>`,
+// a `<datalist>` and a date or time `<input>` look fine closed and open a menu or calendar the
+// browser paints, which no stylesheet reaches -- a styled `<select>` passes every token check
+// here and still opens the operating system's list. Aspen builds each of them itself;
+// `controls.md` in the custom-ui skill has the anatomy to build from.
+//
+// Matched only where a page actually creates one: lowercase JSX or HTML (`<Select>` is a
+// component), a `createElement`/`h`/`el` call, or an input whose `type` is set to a date or time
+// kind. Comments are prose, and a field descriptor's `{ type: 'date' }` is data, not markup.
+const DATE_TYPES = '(date|time|datetime-local|month|week)'
+const CREATES = String.raw`(?:createElement|\bh|\bel|\bjsxs?)\(\s*`
+const NATIVE_CONTROLS = [
+  {
+    control: '<select>',
+    instead: 'the Select in `controls.md`',
+    patterns: [/<select\b/, new RegExp(`${CREATES}['"]select['"]`)]
+  },
+  {
+    control: '<datalist>',
+    instead: 'the Lookup in `controls.md`',
+    patterns: [/<datalist\b/, new RegExp(`${CREATES}['"]datalist['"]`)]
+  },
+  {
+    control: 'a date or time `<input>`',
+    instead: 'the Date picker in `controls.md`',
+    patterns: [
+      new RegExp(`<input\\b[^>]*\\btype\\s*=\\s*\\{?\\s*['"]${DATE_TYPES}['"]`),
+      new RegExp(`\\.type\\s*=\\s*['"]${DATE_TYPES}['"]`),
+      new RegExp(`setAttribute\\(\\s*['"]type['"]\\s*,\\s*['"]${DATE_TYPES}['"]`),
+      new RegExp(`${CREATES}['"]input['"]\\s*,\\s*\\{[^}]*\\btype\\s*:\\s*['"]${DATE_TYPES}['"]`)
+    ]
+  }
+]
+
+// `//` comments too, here: this check reads markup and calls, not CSS, so a `//` that opens a
+// comment is one. Only a `//` after whitespace counts, which leaves `https://` in a string alone.
+const stripLineComments = (source) =>
+  source.split('\n').map((line) => line.replace(/(^|\s)\/\/\s.*$/, '$1')).join('\n')
+
+export function findNativeControls (source) {
+  if (COMPONENT_EXEMPT.test(source)) return []
+  const scannable = stripLineComments(stripBlockComments(source))
+  const findings = []
+  for (const rule of NATIVE_CONTROLS) {
+    for (const pattern of rule.patterns) {
+      const match = new RegExp(pattern.source, 'g').exec(scannable)
+      if (!match) continue
+      findings.push({
+        control: rule.control,
+        instead: rule.instead,
+        line: scannable.slice(0, match.index).split('\n').length
+      })
+      break
+    }
+  }
+  return findings
+}
+
+// ---- a text glyph or emoji standing in for an icon -----------------------------------
+//
+// The other half of a generic-looking control: the chevron typed as `▾`, the calendar as 📅, the
+// month arrows as `‹ ›`, the clear button as `×`. Each renders in whatever font the browser picks
+// (an emoji in full colour), at a size and colour the design system cannot reach. Aspen draws
+// them as SVG; `aspen-icons.ts` in the custom-ui skill has its glyphs.
+//
+// A finding is a string literal or a JSX text node that is NOTHING but such glyphs (escapes
+// included), so prose like "Loading…" or "2 × 3" is left alone.
+const GLYPH = /^(?:[\u25B2-\u25C3\u2039\u203A\u00AB\u00BB\u27E8\u27E9\u00D7\u2715-\u2717\u2713\u2714\u2630\u22EE\u22EF\u2026\u2304\u2303\u2315\u2190-\u2193\u21E0-\u21E3]|\p{Extended_Pictographic})$/u
+const unescape = (text) => text
+  .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+  .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+const onlyGlyphs = (raw) => {
+  const chars = [...unescape(raw).replace(/[\s\uFE0F\u200D]/g, '')]
+  return chars.length > 0 && chars.length <= 3 && chars.every((ch) => GLYPH.test(ch))
+}
+
+export function findGlyphIcons (source) {
+  const scannable = stripLineComments(stripBlockComments(source))
+  const original = source.split('\n')
+  const findings = []
+  const seen = new Set()
+  const report = (index, glyph) => {
+    const line = scannable.slice(0, index).split('\n').length
+    if (EXEMPT.test(original[line - 1] ?? '') || EXEMPT.test(original[line - 2] ?? '')) return
+    if (seen.has(`${line}:${glyph}`)) return
+    seen.add(`${line}:${glyph}`)
+    findings.push({ line, glyph: unescape(glyph).trim() })
+  }
+  for (const match of scannable.matchAll(/(['"`])([^'"`\n]{1,24})\1/g)) {
+    if (onlyGlyphs(match[2])) report(match.index, match[2])
+  }
+  for (const match of scannable.matchAll(/>([^<>{}\n]{1,8})</g)) {
+    if (onlyGlyphs(match[1])) report(match.index, match[1])
+  }
+  return findings
+}
+
 // The two rules the build applies, so the answer here matches the build's: under the
 // reserved `--ap-` prefix only `--ap-sem-*` and `--ap-comp-*` are Guest-usable, and only the
 // names the installed snapshot defines. Declarations count as well as references -- the
@@ -391,7 +490,9 @@ export function decide (filePath, content, known, whole = true) {
   const unknown = findUnknownTokens(source, known)
   const hardcoded = findHardcodedValues(source)
   const mismatched = whole ? findComponentMismatches(source) : []
-  if (!unknown.length && !hardcoded.length && !mismatched.length) return null
+  const native = findNativeControls(source)
+  const glyphs = findGlyphIcons(source)
+  if (!unknown.length && !hardcoded.length && !mismatched.length && !native.length && !glyphs.length) return null
 
   const parts = []
 
@@ -434,6 +535,31 @@ export function decide (filePath, content, known, whole = true) {
       '`--ap-sem-*` only for what it does not (a magnitude bar in a cell, say). If this is ' +
       'deliberately not that component — a layout table, a control that has to look ' +
       'different — put `aspen-component-exempt: <reason>` in a comment anywhere in the file.'
+    )
+  }
+
+  if (native.length) {
+    parts.push(
+      'These are native controls whose menu or calendar the browser draws. No stylesheet reaches ' +
+      'it, so the opened control is the operating system\'s, not Aspen\'s, however the closed ' +
+      'one is styled:\n' +
+      native.map(({ line, control, instead }) => `  line ${line}: ${control} → build ${instead}`).join('\n') +
+      '\n\nBuild it from the custom-ui skill\'s `controls.md` (anatomy, tokens per part, keyboard), ' +
+      'with its icons from `aspen-icons.ts` — never a text glyph or emoji. If a native control is ' +
+      'deliberate (a hidden form field, say), put `aspen-component-exempt: <reason>` in a comment ' +
+      'anywhere in the file.'
+    )
+  }
+
+  if (glyphs.length) {
+    parts.push(
+      'These are text glyphs or emoji standing in for icons. They render in whatever font the ' +
+      'browser picks, at a size and colour no token reaches; Aspen draws every one as an SVG:\n' +
+      glyphs.map(({ line, glyph }) => `  line ${line}: \`${glyph}\``).join('\n') +
+      '\n\nUse the platform glyph from the custom-ui skill\'s `aspen-icons.ts` (ChevronDown, Check, ' +
+      'Close, Search, CalendarToday, ArrowLeft, ArrowRight, Spinner), sized by the part\'s icon-size ' +
+      'token. If the character is genuinely text, put `aspen-token-exempt: <reason>` in a comment ' +
+      'on that line or the line above.'
     )
   }
 

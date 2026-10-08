@@ -21,7 +21,9 @@ import {
   tokenNamesFor,
   findHardcodedValues,
   findUnknownTokens,
-  findComponentMismatches
+  findComponentMismatches,
+  findNativeControls,
+  findGlyphIcons
 } from '../../../hooks/guard-ui-tokens.mjs'
 
 const EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.css', '.scss'])
@@ -45,25 +47,32 @@ const asJson = args.includes('--json')
 const root = args.find((arg) => !arg.startsWith('--')) ?? '.'
 
 const results = []
+let files = 0
 let unchecked = 0
 
 for (const path of walk(root)) {
+  files++
   const source = readFileSync(path, 'utf8')
   const known = tokenNamesFor(path)
   if (!known) unchecked++
   const unknown = findUnknownTokens(source, known)
   const hardcoded = findHardcodedValues(source)
   const mismatched = findComponentMismatches(source)
-  if (!unknown.length && !hardcoded.length && !mismatched.length) continue
-  results.push({ file: relative(root, path), unknown, hardcoded, mismatched })
+  const native = findNativeControls(source)
+  const glyphs = findGlyphIcons(source)
+  if (!unknown.length && !hardcoded.length && !mismatched.length && !native.length && !glyphs.length) continue
+  results.push({ file: relative(root, path), unknown, hardcoded, mismatched, native, glyphs })
 }
 
 if (asJson) {
   console.log(JSON.stringify({ filesWithoutSdkSnapshot: unchecked, results }, null, 2))
 } else if (!results.length) {
-  console.log('ui-tokens: clean.')
+  console.log(unchecked
+    ? `ui-tokens: no findings, but token names were not checked in ${unchecked} of ${files} file(s) — ` +
+      'no installed @aspen-crm/sdk with a token snapshot, so an `--ap-*` name that does not exist passes.'
+    : 'ui-tokens: clean.')
 } else {
-  for (const { file, unknown, hardcoded, mismatched } of results) {
+  for (const { file, unknown, hardcoded, mismatched, native, glyphs } of results) {
     console.log(`\n${file}`)
     for (const { line, name, reserved, nearest } of unknown) {
       console.log(reserved
@@ -80,19 +89,25 @@ if (asJson) {
         prefixes.map((prefix) => `\`${prefix}*\``).join(' or ') + ' token referenced'
       )
     }
+    for (const { line, control, instead } of native) {
+      console.log(`  ${line}: ${control} — the browser draws its menu or calendar; build ${instead}`)
+    }
+    for (const { line, glyph } of glyphs) {
+      console.log(`  ${line}: \`${glyph}\` stands in for an icon — use the glyph from \`aspen-icons.ts\``)
+    }
   }
   const counted = results.reduce(
-    (sum, r) => sum + r.unknown.length + r.hardcoded.length + r.mismatched.length, 0)
+    (sum, r) => sum + r.unknown.length + r.hardcoded.length + r.mismatched.length + r.native.length + r.glyphs.length, 0)
   console.log(
     `\n${counted} finding(s) in ${results.length} file(s). Token names come from the ` +
     'installed SDK (`typescript/node_modules/@aspen-crm/sdk/dist/tokens/`). For a value the system ' +
     'has no token for, add ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above, or ' +
-    '`aspen-component-exempt: <reason>` anywhere in the file for a component finding.'
+    '`aspen-component-exempt: <reason>` anywhere in the file for a component or native-control finding.'
   )
 }
 
-if (unchecked && !asJson) {
+if (unchecked && results.length && !asJson) {
   console.log(`\nui-tokens: ${unchecked} file(s) had no installed @aspen-crm/sdk with a token ` +
     'snapshot; token names were not checked in them.')
 }

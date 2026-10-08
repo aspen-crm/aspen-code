@@ -19,6 +19,10 @@ that is the backstop, not the decision.
 - Declare it in `typescript/aspen.client.json`: a page under `routing.routes` (`path`, `module`,
   `export`, and a `name` if a tab will open it), a layout section under `layout.sections` (`name`,
   `allowed-objects`, `module`, `export`).
+- Styles go in a stylesheet the entry module imports (`import './plan.css'`): x-cli bundles it
+  with the entry, and the platform links it inside the page's shadow root. x-cli's tsconfig sets
+  `noUncheckedSideEffectImports`, so add `typescript/src/css.d.ts` holding
+  `declare module '*.css';` or the build fails on the import.
 - A `custom_page` tab names its page `ui_main_c.<route name>` — see `metadata`'s
   `metadata-shapes.md`. A custom (`_c`) codefile serves at
   `/ui/c/<base-url-path-part>/<route path>`; `/ui/a/` is app scope, not yours.
@@ -53,10 +57,17 @@ section.** It holds the required control choices, the token rules (names, build 
 exemptions, older SDKs), typography, and the rendered-UI checks. To choose a control's
 `--ap-comp-*` family, use [ui-component-tokens.md](ui-component-tokens.md).
 
+**A select, a lookup or a date field: build it from [controls.md](controls.md)** — the platform's
+anatomy for each, part by part, with the token for every part and the keyboard it answers to —
+and copy [aspen-icons.ts](aspen-icons.ts) into `typescript/src/` for its chevron, check, clear,
+search, calendar and month arrows. Never a native `<select>`, `<datalist>` or date/time `<input>`
+(the browser draws their menus and calendars), and never a text glyph or emoji for an icon.
+
 A hook enforces the token rules as you write: it denies a hardcoded colour, spacing, radius,
 border width, type value or shadow where a token exists, an `--ap-*` name the installed SDK does
-not define, and a table, button, select or textarea styled from the semantic layer alone. Each has
-a documented escape hatch (`aspen-token-exempt:` / `aspen-component-exempt:` with a reason).
+not define, a table, button, select or textarea styled from the semantic layer alone, and a native
+`<select>`, `<datalist>` or date/time `<input>`. Each has a documented escape hatch
+(`aspen-token-exempt:` / `aspen-component-exempt:` with a reason).
 
 ## 4. Build and check
 
