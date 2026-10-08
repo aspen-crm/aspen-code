@@ -61,6 +61,7 @@ what it actually does) and the compiler first, then real components in `metadata
 | 2 | Any feature, number, rule, status flow, screen | `model-first` — which tier: metadata, trigger, or page |
 | 3 | Authoring metadata into `metadata/custom/` | `metadata` |
 | 4 | Writing a Rust record trigger or web API in `rust/` | `server-code` |
+| 4b | Writing or restyling a page or layout section in `typescript/` | `custom-ui` — where it goes, design tokens and components, the rendered-UI checks |
 | 5 | Compile, deploy through the check-in chain, prove it with a record round-trip | `build-and-deploy` |
 | — | A compile, check-in, or the instance behaves unexpectedly | `diagnose` |
 | — | Move records (and the objects and fields they need) from another Aspen instance into this one | `instance-migration` |
