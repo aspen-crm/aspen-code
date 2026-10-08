@@ -78,9 +78,7 @@ processed. If it must run on change, it is a trigger.
 
 It often is. A page earns its place when it renders something no `layout_p` can: an editable grid,
 a chart, a timeline, a multi-object workspace, a side-by-side comparison, a bulk editor. Build it
-— over a model that already exists, composed from stored fields. (UI authoring in `typescript/` is
-not covered by this plugin yet; follow the instance directory's `AGENTS.md` and `aspen compile
---typescript`.)
+— over a model that already exists, composed from stored fields, with `custom-ui`.
 
 **The escape hatch.** A value that genuinely must be computed on read — because it depends on the
 viewer, on today's date, or on a combination too wide to store — stays in the page. Name it in the

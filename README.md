@@ -42,6 +42,7 @@ plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
 | `model-first` | Before any feature: metadata, trigger, or page? |
 | `metadata` | Authoring `metadata/custom/` and validating with `aspen compile --metadata` |
 | `server-code` | Rust record triggers and web APIs in `rust/` (six verified patterns) |
+| `custom-ui` | TypeScript pages and layout sections in `typescript/`: where they go, design tokens and components, build/lint checks, verifying the rendered UI |
 | `build-and-deploy` | `aspen compile` → `save-package` → `checkin-prep` → `checkin-index` → `checkin-deploy` → verify |
 | `diagnose` | Failed compiles/check-ins, version skew, login trouble, triggers that don't fire |
 | `instance-migration` | Copy records from another Aspen instance: map objects, fields and picklist values with the user, dry run, pilot, bulk load through the REST API, verify |
@@ -60,7 +61,14 @@ folder-local one), run from an instance directory, whose instance matches both t
 folder and the login. It refuses a deploy verb outside an instance folder or against a
 mismatched login, and asks before a command leaves the session's folder.
 
-Not in 0.0.1: TypeScript UI authoring guidance, and the other guard hooks from 2.8.x.
+**UI guard:** before a file write or edit in `typescript/`, a hook denies a hardcoded colour,
+spacing, radius, type value or shadow where the design system publishes a token, an `--ap-*` name
+the installed `@aspen-crm/sdk` does not define, and a table/button/select/textarea rebuilt from
+semantic tokens alone; each has a documented exemption comment. It asks once when a write first
+declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
+same checks over a tree for CI.
+
+Not in 0.0.1: the other guard hooks from 2.8.x.
 
 ## Install (testers)
 
