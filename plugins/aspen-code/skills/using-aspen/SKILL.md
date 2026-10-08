@@ -22,7 +22,9 @@ Three facts, in this order. The session-start note states them when hooks are on
 
 Then run **`aspen doctor`** once in the instance directory. It is the CLI's own readiness report
 (JSON when an agent runs it, one `id` + `status` per check, exit 1 only on a `problem`). Fix every
-`problem` before authoring; read the `fix` it gives. `instance.cli-matches-instance` failing means
+`problem` before authoring; read the `fix` it gives — except `instance.logged-in`, whose fix
+names `--api-key`: hand the user `aspen login -i <url>` instead (`getting-started` §2).
+`instance.cli-matches-instance` failing means
 the CLI and the instance are on different releases — nothing will compile or deploy correctly
 until that is resolved (see `diagnose`).
 
