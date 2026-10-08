@@ -397,3 +397,84 @@ test('a hardcode in an Edit fragment is still caught', () => {
   // The other two checks are line-scoped and stay on for a fragment.
   assert.ok(decide(UI, css('.x { padding: 16px; }'), KNOWN, false))
 })
+
+// ---- native controls the browser draws -----------------------------------------------
+
+import { findNativeControls, findGlyphIcons } from '../hooks/guard-ui-tokens.mjs'
+
+test('a native select, datalist or date/time input is caught wherever a page creates one', () => {
+  const cases = [
+    ['<select value={v}>', '<select>'],
+    ["const el = h('select', { className: 'control' })", '<select>'],
+    ["el.innerHTML = `<select name=\"s\"></select>`", '<select>'],
+    ['doc.createElement("datalist")', '<datalist>'],
+    ['<input\n  type="date"\n  value={d} />', 'a date or time `<input>`'],
+    ["input.type = 'datetime-local'", 'a date or time `<input>`'],
+    ["i.setAttribute('type', 'time')", 'a date or time `<input>`'],
+    ["h('input', { className: 'x', type: 'date' })", 'a date or time `<input>`']
+  ]
+  for (const [source, control] of cases) {
+    const [finding] = findNativeControls(source)
+    assert.ok(finding, `${source} should be flagged`)
+    assert.equal(finding.control, control, source)
+  }
+})
+
+test('look-alikes of a native control are left alone', () => {
+  // Every one of these is in real custom UI: a picker that explains in its JSDoc why it is not a
+  // native <select>, a query for one, an Aspen-style component, and a field descriptor.
+  for (const source of [
+    "root.querySelector('select')",
+    '<Select options={o} />',
+    "{ name: 'close_date_c', type: 'date' }",
+    "if (f.type === 'date') x()",
+    '/** a native <select> opens a browser-owned menu */\nconst a = 1',
+    '// <input type="date"> paints a browser calendar\nconst b = 2',
+    "fetch('https://example.com/select')",
+    '<input type="text" />'
+  ]) assert.deepEqual(findNativeControls(source), [], source)
+})
+
+test('a deliberate native control can be exempted for the file', () => {
+  assert.deepEqual(findNativeControls('/* aspen-component-exempt: a hidden form field */\n<select hidden />'), [])
+})
+
+test('a native control is denied even in an Edit fragment, with where to build it instead', () => {
+  const reason = decide(UI, '<input type="date" />', KNOWN, false)
+  assert.match(reason, /a date or time `<input>`/)
+  assert.match(reason, /controls\.md/)
+  assert.match(reason, /aspen-icons\.ts/)
+})
+
+// ---- a text glyph or emoji standing in for an icon -------------------------------------
+
+test('a glyph or emoji standing in for an icon is caught, escapes included', () => {
+  // The shapes a session actually shipped: a ▾ chevron, a 📅 written as an escape, ‹ › month
+  // arrows and a × clear button.
+  const cases = [
+    ["h('span', { textContent: '▾' })", '▾'],
+    ["textContent: '\\u{1F4C5}'", '📅'],
+    ["textContent: '‹', title: 'Previous'", '‹'],
+    ["textContent: '×',", '×'],
+    ['<button>✕</button>', '✕'],
+    ['label = "\\u25BE"', '▾']
+  ]
+  for (const [source, glyph] of cases) {
+    const [finding] = findGlyphIcons(source)
+    assert.ok(finding, `${source} should be flagged`)
+    assert.equal(finding.glyph, glyph, source)
+  }
+})
+
+test('text that merely contains a glyph is prose, not an icon', () => {
+  for (const source of ["'Loading…'", "'2 × 3'", "'Next ›'", "textContent: '*'", "'—'", "/* uses ▾ */ const q = 1"]) {
+    assert.deepEqual(findGlyphIcons(source), [], source)
+  }
+  assert.deepEqual(findGlyphIcons("// aspen-token-exempt: a multiplication sign in a formula\nconst m = '×'"), [])
+})
+
+test('a glyph icon is denied and pointed at the platform glyphs', () => {
+  const reason = decide(UI, "chevron.textContent = '▾'", KNOWN)
+  assert.match(reason, /stand(ing)? in for icons/)
+  assert.match(reason, /ChevronDown/)
+})

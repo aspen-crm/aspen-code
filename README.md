@@ -63,8 +63,11 @@ mismatched login, and asks before a command leaves the session's folder.
 
 **UI guard:** before a file write or edit in `typescript/`, a hook denies a hardcoded colour,
 spacing, radius, type value or shadow where the design system publishes a token, an `--ap-*` name
-the installed `@aspen-crm/sdk` does not define, and a table/button/select/textarea rebuilt from
-semantic tokens alone; each has a documented exemption comment. It asks once when a write first
+the installed `@aspen-crm/sdk` does not define, a table/button/select/textarea rebuilt from
+semantic tokens alone, a native `<select>`/`<datalist>`/date or time `<input>` (the browser draws
+their menus and calendars), and a text glyph or emoji standing in for an icon; each has a
+documented exemption comment. `custom-ui` carries the anatomy of Aspen's select, lookup and date
+controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 

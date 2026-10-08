@@ -10,15 +10,20 @@ Token usage alone is not component correctness. Match the native control's struc
 scale, spacing, states and interaction. These requirements apply to edits as well as new pages.
 
 Before markup, inspect the project's shared controls and identify each needed Aspen counterpart.
+For a select, lookup or date control, build it from [controls.md](controls.md), with the icons in
+[aspen-icons.ts](aspen-icons.ts); a hook denies the native `<select>`, `<datalist>` and date or time
+`<input>` that would stand in for one.
 For a new or changed control, inspect a native example in the running instance when available,
 including its open/edit state. Then pick its token family from `ui-component-tokens.md` and read that family's `.d.ts`.
 Keep a short implementation note of the counterpart and shared helper chosen; no new approval
 step or user-facing design document is required.
 
-| Meaning                                                            | Required control and token families                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Record reference, including an account/engagement/product selector | Lookup/typeahead (`--ap-comp-typeahead-*`), preserving record id separately from display text. Search, select, show the selected record, and clear when optional. An ordinary `<select>` or free-text id input is not a lookup.                                               |
-| Picklist or fixed choice                                           | Select (`--ap-comp-select-*`), including the opened menu, selected/hover/focus states and keyboard operation. Picklist option text comes from metadata labels; values remain technical names. A styled closed `<select>` does not prove its browser-owned menu matches Aspen. |
+| Meaning | Required control and token families |
+| --- | --- |
+| Record reference, including an account/engagement/product selector | Lookup/typeahead (`--ap-comp-typeahead-*`), preserving record id separately from display text. Search, select, show the selected record, and clear when optional. An ordinary `<select>`, a `<datalist>` or a free-text id input is not a lookup. Anatomy: [controls.md](controls.md#lookup--a-record-reference). |
+| Picklist or fixed choice | Select (`--ap-comp-select-*`, options `--ap-comp-menubase-*`), including the opened menu, selected/hover/focus states and keyboard operation. Picklist option text comes from metadata labels; values remain technical names. **Never a native `<select>`**: its menu is drawn by the browser and no stylesheet reaches it. Anatomy: [controls.md](controls.md#select--a-picklist-or-fixed-choice). |
+| Date | Date picker (`--ap-comp-datepicker-*`, popover `--ap-comp-datemenu-*`, grid `--ap-comp-calendar-*` and `--ap-comp-datecell-*`): segmented `mm / dd / yyyy` entry plus a calendar trigger. **Never `<input type="date">`**: the browser draws its calendar. Anatomy: [controls.md](controls.md#date--a-date-field). |
+| Date range, date and time, time | `--ap-comp-daterange-*`, `--ap-comp-datetimepicker-*`, `--ap-comp-timepicker-*`, built the same way. Never `<input type="datetime-local" \| "time" \| "month" \| "week">`. |
 | Text / numeric value                                               | `--ap-comp-textinput-*` / `--ap-comp-numberinput-*`, respectively, including labels and error states. Numeric fields retain numeric input semantics. Do not apply select styles to these fields.                                                                              |
 | Record navigation                                                  | Link (`--ap-comp-link-*`) plus the verified SDK/instance navigation helper. Preserve instance and tab context; exercise the destination.                                                                                                                                      |
 | Table with actions above it                                        | Table/cell tokens plus `--ap-comp-cardheader-*` for a card header. Button padding does not provide the header's outer spacing.                                                                                                                                                |
@@ -166,7 +171,9 @@ Rules that matter:
 - **Older SDK without a snapshot?** If `node_modules/@aspen-crm/sdk/dist/manifest.json` has no
   `tokenStyleSheetFilePath`, none of the validation below applies: the page inherits the host's
   current tokens, a misspelled name silently does nothing, and there are no token modules or
-  `.d.ts` files to read names from. Read names off a native element in the running instance
+  `.d.ts` files to read names from. For a select, lookup, date field or button, copy the names in
+  [controls.md](controls.md) — each one is checked against the platform's own token list. For
+  anything else, read names off a native element in the running instance
   (computed styles in browser devtools), copy them exactly, and keep the light-value fallback. A newer `x-cli` fails the
   build against such an SDK; tell the human the SDK needs upgrading rather than upgrading it
   yourself. (`typescript/package.json` pins `@aspen-crm/sdk` and `@aspen-crm/x-cli` to the

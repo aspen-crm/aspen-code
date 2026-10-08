@@ -3,8 +3,9 @@
 // instance directory's `typescript/`, checked as it is written.
 //
 //   guard-ui-tokens.mjs         denies a hardcoded value where the design system publishes a
-//                               token, an `--ap-*` name the installed SDK does not define, and a
-//                               table/button/select/textarea rebuilt from semantic tokens alone.
+//                               token, an `--ap-*` name the installed SDK does not define, a
+//                               table/button/select/textarea rebuilt from semantic tokens alone,
+//                               a native select/datalist/date-time input, and a glyph icon.
 //   guard-custom-ui-surface.mjs asks once when a write first declares a page, layout section or
 //                               custom-page tab, the moment changing tier is still cheap.
 //

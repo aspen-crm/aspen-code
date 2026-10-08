@@ -85,13 +85,28 @@ test('hooks.json runs guard-ui on Claude Code and Codex file edits', () => {
   assert.doesNotMatch('Bash', new RegExp(`^(${ui.matcher})$`))
 })
 
+test('a native date input or a glyph chevron is denied as it is written', (t) => {
+  const { dir } = instance(t)
+  const date = evaluate({ tool_name: 'Edit', cwd: dir, tool_input: { file_path: 'typescript/src/panel.tsx', old_string: 'x', new_string: '<input type="date" />' } }, CLAUDE)
+  assert.equal(decision(date).permissionDecision, 'deny')
+  assert.match(decision(date).permissionDecisionReason, /controls\.md/)
+  const glyph = evaluate({ tool_name: 'Write', cwd: dir, tool_input: { file_path: 'typescript/src/picker.ts', content: "chevron.textContent = '\\u25BE'\n" } }, CLAUDE)
+  assert.equal(decision(glyph).permissionDecision, 'deny')
+  assert.match(decision(glyph).permissionDecisionReason, /aspen-icons\.ts/)
+})
+
 test('lint-ui-tokens flags a tree with a hardcode and passes a clean one', (t) => {
   const { dir, put } = instance(t)
   put('typescript/src/plan.ts', 'export const STYLE = `.x { padding: 16px; }`\n')
   const dirty = spawnSync('node', [lint, join(dir, 'typescript', 'src')], { encoding: 'utf8' })
   assert.equal(dirty.status, 1)
   assert.match(dirty.stdout, /padding: 16px/)
+  put('typescript/src/picker.ts', "export const select = () => h('select', {})\n")
+  const native = spawnSync('node', [lint, join(dir, 'typescript', 'src')], { encoding: 'utf8' })
+  assert.match(native.stdout, /<select> — the browser draws its menu/)
+  put('typescript/src/picker.ts', '// a native <select> would open a browser menu\nexport const ok = 1\n')
   put('typescript/src/plan.ts', 'export const STYLE = `.x { padding: var(--ap-sem-spacing-inner-md); }`\n')
   const clean = spawnSync('node', [lint, join(dir, 'typescript', 'src')], { encoding: 'utf8' })
   assert.equal(clean.status, 0, clean.stdout)
+  assert.match(clean.stdout, /token names were not checked in 3 of 3 file\(s\)/, 'no SDK installed, so "clean" must not claim the names were checked')
 })
