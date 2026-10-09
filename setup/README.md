@@ -57,18 +57,18 @@ Remove-Item -Recurse -Force "$HOME\.aspen-code" -ErrorAction SilentlyContinue; N
 **Check:** `~/.aspen-code/.claude-plugin/marketplace.json` exists. If the download fails, it's
 network or proxy trouble. Say so and stop.
 
-### 2. Remove the production plugin, if it is installed
+### 2. Remove the old plugin, if it is installed
 
-The production `aspen-code@aspen` (from `aspen-crm/aspen-tools`) defines skills with the same
-names. With both installed, the model gets two sets of Aspen instructions.
+`aspen-code@aspen` (from `aspen-crm/aspen-tools`, which no longer offers it) defines skills with
+the same names. With both installed, the model gets two sets of Aspen instructions.
 
 | Host | Check | Remove (ask first) |
 |---|---|---|
 | Claude Code | `claude plugin list` shows `aspen-code@aspen` | `claude plugin uninstall aspen-code@aspen` |
 | Codex | `codex plugin list` shows `aspen-code@aspen` | `codex plugin remove aspen-code@aspen` |
 
-Remove only `aspen-code@aspen`. Leave `aspen-cowork@aspen` and the `aspen` marketplace alone —
-removing a marketplace uninstalls everything from it.
+Remove only `aspen-code@aspen`. Leave `aspencrm-ai@aspen` — the records plugin, a different
+lane — and the `aspen` marketplace alone: removing a marketplace uninstalls everything from it.
 
 ### 3. Install the plugin
 
