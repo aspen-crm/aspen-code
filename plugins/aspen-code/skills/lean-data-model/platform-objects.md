@@ -5,8 +5,8 @@ catalogue to check it against. Read it before authoring a new object, every time
 word and the platform word are usually different, which is exactly why the check gets skipped.
 
 **The list below is from a real instance at platform 26.3.3 and is a convenience, not the
-authority.** The authority is `ls metadata/platform/object_p/` in the instance directory you are in, because
-an installed application package adds `_a` objects this cannot know about.
+authority.** The authority is `ls metadata/platform/object_p/` in the instance directory you are
+in, because the platform's own set moves between releases.
 
 ## The words that catch people out
 
