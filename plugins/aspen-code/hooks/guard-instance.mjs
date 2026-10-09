@@ -5,27 +5,24 @@
 // The CLI already refuses a folder whose `.aspen/config.toml` names another instance than the
 // login. What it lets through, and this closes:
 //
-//   1. The wrong binary. A Builder-era folder carries its own CLI at `.aspen/bin/aspen`, and a
-//      shell function (or PATH) can run that instead of aspenup's proxy. Agent shells load the
-//      user's profile, so a bare `aspen` may not be the aspen this plugin is written for.
-//   2. `aspen move` outside any instance folder. Nothing is checked then: it acts on whichever
+//   1. `aspen move` outside any instance folder. Nothing is checked then: it acts on whichever
 //      instance is logged in. A deploy from the wrong directory reaches the wrong instance.
-//   3. Leaving the session's folder. The session belongs to the instance folder its working
+//   2. Leaving the session's folder. The session belongs to the instance folder its working
 //      directory sits in; a `cd` into, or `--dir` at, another instance folder is a different
 //      instance's work, even when the login happens to match it.
-//   4. A folder that does not match the login. The CLI refuses too, but this names the fix:
+//   3. A folder that does not match the login. The CLI refuses too, but this names the fix:
 //      the user signs in again (the model never runs `aspen login`).
 //
-// 1, 2 and 4 are refused outright. 3 (and `aspen logout`) asks: Claude Code prompts; Codex, whose
+// 1 and 3 are refused outright. 2 (and `aspen logout`) asks: Claude Code prompts; Codex, whose
 // hooks cannot prompt, refuses with a note to ask the user and re-run with ASPEN_CODE_CONFIRMED=1.
 //
 // Stateless, offline and read-only: it reads `.aspen/config.toml` files and the `instance` field
 // of credentials.json, nothing else. It understands `cd X && …` chains and `--dir`, not every
 // shell construct — it is a guardrail, not a sandbox. Any error fails open (exit 0, no output).
 
-import { existsSync, realpathSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { credentialsPath, instanceDir, loggedInInstance } from './session-start.mjs'
 
@@ -89,27 +86,12 @@ export function invocations (command, cwd, home = homedir()) {
       const value = args[d].includes('=') ? args[d].split('=').slice(1).join('=') : args[d + 1]
       if (value) dir = at(here, value, home)
     }
-    // A path to the binary resolves where the command runs, after any `cd`.
-    const path = /[\\/]/.test(head) ? at(here, head, home) : null
-    found.push({ binary: head, path, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed })
+    found.push({ binary: head, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed })
   }
   return found
 }
 
-// A Builder-era CLI inside the folder or above it, which a shell function would prefer.
-function folderLocalCli (dir) {
-  let d = dir
-  for (;;) {
-    for (const n of ['aspen', 'aspen.exe']) if (existsSync(join(d, '.aspen', 'bin', n))) return join(d, '.aspen', 'bin', n)
-    const up = dirname(d)
-    if (up === d) return null
-    d = up
-  }
-}
-
 export function decide ({ command, cwd, env = process.env, home = homedir() }) {
-  const aspenHome = env.ASPEN_HOME?.trim() || join(home, '.aspen')
-  const proxy = join(aspenHome, 'bin', process.platform === 'win32' ? 'aspen.exe' : 'aspen')
   const session = instanceDir(cwd)
   const login = loggedInInstance(credentialsPath(env, home))
   const hard = []; const confirm = []
@@ -117,18 +99,6 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
   for (const inv of invocations(command, cwd, home)) {
     const target = instanceDir(inv.dir)
     const verb = [inv.command, inv.command === 'move' ? inv.sub : ''].filter(Boolean).join(' ')
-
-    // 1. The binary.
-    const explicit = inv.path !== null
-    if (explicit && real(inv.path) !== real(proxy) && /[\\/]\.aspen[\\/]bin[\\/]aspen(\.exe)?$/i.test(inv.path) && !real(inv.path).startsWith(real(aspenHome))) {
-      hard.push(`\`${inv.binary}\` is a folder-local, Builder-era CLI, not the aspenup-managed aspen this plugin drives. Run \`${proxy} ${verb}\` instead.`)
-      continue
-    }
-    const local = !explicit && folderLocalCli(inv.dir)
-    if (local && real(local) !== real(proxy)) {
-      hard.push(`\`${dirname(dirname(dirname(local)))}\` carries a Builder-era CLI at \`${local}\`, and the shell may run it for a bare \`aspen\`. Run aspenup's by its full path: \`${proxy} ${verb}\`.`)
-      continue
-    }
 
     if (inv.command === 'login') {
       hard.push('`aspen login` is the user\'s to run, in their own terminal (OAuth in a browser; the CLI refuses it under an agent). Hand them the command — `getting-started` §2.')
@@ -142,19 +112,19 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
     const deploys = inv.command === 'move'
     const bound = deploys || inv.command === 'status' || inv.command === 'init'
 
-    // 2. A deploy verb outside every instance folder.
+    // 1. A deploy verb outside every instance folder.
     if (deploys && !target) {
       hard.push(`\`aspen ${verb}\` is not running in an instance folder (\`${inv.dir}\`), so nothing checks which instance it reaches: it would act on whatever is logged in${login ? ` (\`${login}\`)` : ''}. Run it from the instance folder${session ? ` — \`cd ${session.dir} && …\`` : ''}.`)
       continue
     }
 
-    // 4. The folder names another instance than the login.
+    // 3. The folder names another instance than the login.
     if (bound && target?.instance && login && !same(target.instance, login)) {
       hard.push(`\`${target.dir}\` belongs to \`${target.instance}\`, but the CLI is signed in to \`${login}\`, so \`aspen ${verb}\` would be refused or reach the wrong instance. Ask the user to sign in to this folder's instance in their own terminal: \`aspen login -i ${target.instance}\` (it replaces the current login).`)
       continue
     }
 
-    // 3. Leaving the session's instance folder.
+    // 2. Leaving the session's instance folder.
     if (bound && !inv.confirmed && session && target && real(target.dir) !== real(session.dir)) {
       confirm.push(`This session works in \`${session.dir}\` (\`${session.instance}\`), but \`aspen ${verb}\` targets \`${target.dir}\` (\`${target.instance}\`) — a different instance folder. Run it only if the user asked for that folder.`)
     }

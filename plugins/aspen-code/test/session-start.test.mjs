@@ -94,17 +94,6 @@ test('signed in to a different instance than the directory: warns before any dep
   assert.ok(out.includes(`aspen login -i ${URL_A}`))
 })
 
-test('a Builder-era folder is named as such, not treated as an instance directory', t => {
-  const m = machine(t, { cli: true, onPath: true, login: URL_A })
-  const old = join(m.home, 'Aspen', 'legacy')
-  mkdirSync(join(old, '.aspen', 'bin'), { recursive: true })
-  writeFileSync(join(old, '.aspen', 'bin', 'aspen'), '#!/bin/sh\n')
-  mkdirSync(join(old, 'metacode'), { recursive: true })
-  const out = context({ ...m, cwd: join(old, 'metacode') })
-  assert.match(out, /Builder-era folder/)
-  assert.doesNotMatch(out, /using-aspen/)
-})
-
 test('an instance directory with no build dependencies says what is missing', t => {
   const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
   const dir = join(m.home, 'Aspen', 'acme_dev')

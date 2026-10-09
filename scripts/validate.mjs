@@ -5,8 +5,8 @@
 //
 // Manifests agree and are well formed; every skill has frontmatter and is routed from
 // using-aspen; every relative link in a skill resolves; hook commands point at real files; the
-// read-only agents hold no write tools; and nothing still teaches the retired Builder-era CLI
-// (metacode/, .aspen/bin, ./ac validate, aspen download) that this plugin replaces.
+// read-only agents hold no write tools; and no skill teaches a CLI shape that does not exist
+// (metacode/, .aspen/bin, ./ac validate, aspen download).
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -15,14 +15,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
 const json = (p) => JSON.parse(readFileSync(p, 'utf8'))
 
-// Phrases that only make sense for the Builder-era CLI. A skill containing one is stale.
+// Phrases that name something this CLI does not have. A skill containing one is stale.
 const RETIRED = [
   [/metacode\//, 'metacode/ (the layout is metadata/custom, rust/, typescript/)'],
   [/(^|[\s`(])\.aspen\/bin\/aspen/m, '.aspen/bin/aspen inside the instance folder (aspen is on PATH via aspenup)'],
   [/\.\/ac\b|\bac validate\b/, './ac validate (use aspen compile --metadata)'],
   [/aspen download\b/, 'aspen download (no such verb)'],
   [/aspen move save-package \.\/metacode/, 'save-package ./metacode'],
-  [/Aspen Builder created/, 'Builder-created folders (aspen init creates the directory)'],
   [/aspen login[^\n`]*(--api-key|\s-k\s)/, 'API-key login (sign-in is OAuth, run by the user)'],
   [/--(source|target)-token\b|\btokenFile\b|\.aspen-tokens/, 'migration token files (each command signs in through the browser)']
 ]

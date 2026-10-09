@@ -58,10 +58,10 @@ the whole site — Platform, Customization (CLI, Aspen SDK, Custom UI), API and 
 Customization and API are sign-in-only, the public endpoint cannot return them; they become
 reachable when those sections are published.
 
-**Guard:** before any `aspen` command runs, a hook checks it is aspenup's CLI (not a Builder-era
-folder-local one), run from an instance directory, whose instance matches both the session's
-folder and the login. It refuses a deploy verb outside an instance folder or against a
-mismatched login, and asks before a command leaves the session's folder.
+**Guard:** before any `aspen` command runs, a hook checks it is run from an instance directory
+whose instance matches both the session's folder and the login. It refuses a deploy verb outside
+an instance folder or against a mismatched login, and asks before a command leaves the session's
+folder.
 
 **UI guard:** before a file write or edit in `typescript/`, a hook denies a hardcoded colour,
 spacing, radius, type value or shadow where the design system publishes a token, an `--ap-*` name
@@ -83,8 +83,8 @@ Not in 0.0.1: the remaining guard hooks.
 | Install | `/plugin install aspen-code@aspen-code` | `codex plugin add aspen-code@aspen-code` |
 | Update | `/plugin marketplace update aspen-code` | `codex plugin marketplace upgrade aspen-code` |
 
-**Already have `aspen-code@aspen`?** That was the Builder-era CLI path, shipped from aspen-tools
-and no longer offered there. Uninstall it first or you will have two sets of Aspen skills:
+**Already have `aspen-code@aspen`?** That plugin shipped from aspen-tools and is no longer
+offered there. Uninstall it first or you will have two sets of Aspen skills:
 `/plugin uninstall aspen-code@aspen`, or `codex plugin remove aspen-code@aspen`.
 
 No git? Claude Code can add `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json`

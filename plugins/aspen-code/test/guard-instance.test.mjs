@@ -11,8 +11,7 @@ const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'guard
 const A = 'https://host.example/acme/dev/'
 const B = 'https://host.example/acme/prod/'
 
-// ~/Aspen/acme_dev (A), ~/Aspen/acme_prod (B), ~/Aspen/old_builder (a Builder-era folder with its
-// own CLI), ~/scratch (no instance), and a login.
+// ~/Aspen/acme_dev (A), ~/Aspen/acme_prod (B), ~/scratch (no instance), and a login.
 function machine (t, login = A) {
   const home = mkdtempSync(join(tmpdir(), 'aspen guard '))
   t.after(() => rmSync(home, { recursive: true, force: true }))
@@ -21,13 +20,11 @@ function machine (t, login = A) {
   put(join(dev, '.aspen', 'config.toml'), `instance = "${A}"\n`)
   mkdirSync(join(dev, 'metadata', 'custom'), { recursive: true })
   put(join(prod, '.aspen', 'config.toml'), `instance = "${B}"\n`)
-  const old = join(home, 'Aspen', 'old_builder')
-  put(join(old, '.aspen', 'bin', 'aspen'), '#!/bin/sh\n')
   mkdirSync(join(home, 'scratch'), { recursive: true })
   if (login) put(join(home, '.config', 'aspen', 'credentials.json'), JSON.stringify({ instance: login }))
   const env = { ASPEN_HOME: join(home, '.aspen') }
   const run = (command, cwd = dev) => decide({ command, cwd, env, home })
-  return { home, dev, prod, old, scratch: join(home, 'scratch'), env, run }
+  return { home, dev, prod, scratch: join(home, 'scratch'), env, run }
 }
 
 test('parses cd chains, env prefixes, --dir and flag values', () => {
@@ -69,20 +66,11 @@ test('leaving the session folder for another instance folder asks, even when the
   assert.deepEqual(confirmed, { hard: [], confirm: [] })
 })
 
-test('a folder-local Builder-era CLI is refused, by bare name or by path', t => {
-  const m = machine(t)
-  assert.match(m.run('aspen compile', m.old).hard[0], /Builder-era CLI/)
-  assert.match(m.run(`"${m.old}/.aspen/bin/aspen" move save-package`).hard[0], /folder-local/)
-  assert.deepEqual(m.run(`"${m.home}/.aspen/bin/aspen" status`), { hard: [], confirm: [] })
-})
-
-test('aspenup\'s CLI by ~ or $HOME is allowed; a relative path resolves after the cd', t => {
+test('aspenup\'s CLI by ~ or $HOME is allowed, wherever the command names it from', t => {
   const m = machine(t)
   for (const bin of ['~/.aspen/bin/aspen', '$HOME/.aspen/bin/aspen', '"${HOME}/.aspen/bin/aspen"']) {
     assert.deepEqual(m.run(`cd "${m.dev}" && ${bin} doctor`), { hard: [], confirm: [] }, bin)
   }
-  assert.match(m.run(`cd "${m.old}" && ./.aspen/bin/aspen compile`).hard[0], /folder-local/)
-  assert.match(m.run('.aspen/bin/aspen compile', m.old).hard[0], /folder-local/)
 })
 
 test('login is refused, logout asks', t => {

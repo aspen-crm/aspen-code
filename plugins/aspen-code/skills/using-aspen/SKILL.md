@@ -89,8 +89,7 @@ copy the shape, change it, compile.
 - **Right binary, right folder, right instance — every `aspen` command.** Run it from the
   session's instance directory (or pass that directory with `--dir`), and only after
   `.aspen/config.toml` there names the instance the user means *and* the one the CLI is signed
-  in to. If the shell's `aspen` is a folder-local Builder-era CLI, run `~/.aspen/bin/aspen` by
-  its full path. Never point a command at another instance's folder without the user asking. A
+  in to. Never point a command at another instance's folder without the user asking. A
   guard hook enforces this (Claude Code asks or refuses; Codex refuses and says how to confirm).
 - **Never handle credentials.** `aspen login` is OAuth in a browser and refuses to run from an
   agent. The user runs it. You never see, type, ask for, or print a token or API key.

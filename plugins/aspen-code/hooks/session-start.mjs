@@ -88,21 +88,6 @@ export function instanceDir (cwd) {
   }
 }
 
-// A Builder-era folder at or above `cwd`: `metacode/` and its own CLI at `.aspen/bin/aspen`, no
-// `.aspen/config.toml`. The shell's `aspen` there may be that older CLI, and the layout is not the
-// one this plugin authors.
-export function builderFolder (cwd) {
-  let dir = cwd
-  for (;;) {
-    // `metacode/` is what makes it a Builder folder: ~/.aspen/bin/aspen is aspenup's own proxy.
-    const cli = ['aspen', 'aspen.exe'].some((n) => isFile(join(dir, '.aspen', 'bin', n)))
-    if (cli && isDir(join(dir, 'metacode')) && !isFile(join(dir, '.aspen', 'config.toml'))) return dir
-    const up = dirname(dir)
-    if (up === dir) return null
-    dir = up
-  }
-}
-
 // What this instance directory still needs installed before it builds — read from disk only:
 // the npm SDK under typescript/node_modules, cargo, the Rust toolchain rust-toolchain.toml pins (in
 // RUSTUP_HOME), and Node on PATH. `aspen init` installs none of them.
@@ -168,16 +153,7 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
     return lines.join('\n')
   }
 
-  if (!here) {
-    const builder = builderFolder(cwd)
-    if (builder) {
-      lines.push(
-        `\`${builder}\` is a Builder-era folder (\`metacode/\` layout, its own older CLI at \`.aspen/bin/aspen\`), not an instance directory \`aspen init\` created. This plugin does not work in it, and a bare \`aspen\` here may run the old CLI.`,
-        'Before any Aspen work, tell the user and ask which instance they mean; `getting-started` §3 creates its directory with `aspen init` elsewhere.'
-      )
-    }
-    return lines.join('\n')
-  }
+  if (!here) return lines.join('\n')
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
   lines.push(update(true))
