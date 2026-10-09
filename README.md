@@ -16,7 +16,7 @@ Start `claude` (or `codex`) in the folder where your Aspen project should live, 
 and paste this:
 
 ```text
-Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. My Aspen instance is https://<host>/<domain>/<instance>.
+Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. Ask me for my Aspen instance URL when you need it.
 ```
 
 It installs the plugin and the Aspen CLI, hands you the sign-in, creates the instance directory

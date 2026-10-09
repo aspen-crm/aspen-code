@@ -7,7 +7,7 @@ and the Aspen CLI, and gets the user signed in. A person can follow it too.
 should live, e.g. `~/Aspen`):
 
 ```text
-Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. My Aspen instance is https://<host>/<domain>/<instance>.
+Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. Ask me for my Aspen instance URL when you need it.
 ```
 
 `git` is recommended but not required. Without it, Claude Code installs the plugin from its
@@ -26,8 +26,8 @@ First work out two things:
   is set). If unsure, ask.
 - **The OS:** macOS/Linux, or Windows (PowerShell).
 
-Get the **instance URL** from the prompt, or ask for it: `https://<host>/<domain>/<instance>`,
-the instance's address in the browser up to the instance name.
+**Ask for the instance URL** unless the user already gave it: `https://<host>/<domain>/<instance>`,
+the instance's address in the browser up to the instance name. Ask once, early — sign-in needs it.
 
 ### 1. Choose where the plugin comes from
 
