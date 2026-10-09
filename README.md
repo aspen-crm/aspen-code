@@ -98,7 +98,7 @@ Try: *"Set me up to build on my Aspen instance."*
 ## Develop
 
 ```sh
-node scripts/validate.mjs                              # manifests, skills, links, retired-CLI phrases
+node scripts/validate.mjs                              # manifests, skills, links
 node --test plugins/aspen-code/test/*.test.mjs         # the session-start hook
 claude plugin validate . && claude plugin validate plugins/aspen-code
 ```

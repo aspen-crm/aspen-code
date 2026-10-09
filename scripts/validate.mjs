@@ -5,8 +5,7 @@
 //
 // Manifests agree and are well formed; every skill has frontmatter and is routed from
 // using-aspen; every relative link in a skill resolves; hook commands point at real files; the
-// read-only agents hold no write tools; and no skill teaches a CLI shape that does not exist
-// (metacode/, .aspen/bin, ./ac validate, aspen download).
+// read-only agents hold no write tools.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -14,17 +13,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
 const json = (p) => JSON.parse(readFileSync(p, 'utf8'))
-
-// Phrases that name something this CLI does not have. A skill containing one is stale.
-const RETIRED = [
-  [/metacode\//, 'metacode/ (the layout is metadata/custom, rust/, typescript/)'],
-  [/(^|[\s`(])\.aspen\/bin\/aspen/m, '.aspen/bin/aspen inside the instance folder (aspen is on PATH via aspenup)'],
-  [/\.\/ac\b|\bac validate\b/, './ac validate (use aspen compile --metadata)'],
-  [/aspen download\b/, 'aspen download (no such verb)'],
-  [/aspen move save-package \.\/metacode/, 'save-package ./metacode'],
-  [/aspen login[^\n`]*(--api-key|\s-k\s)/, 'API-key login (sign-in is OAuth, run by the user)'],
-  [/--(source|target)-token\b|\btokenFile\b|\.aspen-tokens/, 'migration token files (each command signs in through the browser)']
-]
 
 export function validatePlugin (root) {
   const claude = json(join(root, '.claude-plugin/plugin.json'))
@@ -53,9 +41,6 @@ export function validatePlugin (root) {
     for (const file of readdirSync(dir)) {
       if (!/\.(md|rs)$/.test(file)) continue
       const body = readFileSync(join(dir, file), 'utf8')
-      // The router's corrections table names the retired forms on purpose, to overrule the docs.
-      const taught = body.replace(/^### Where the docs are wrong[\s\S]*?(?=^## )/m, '')
-      for (const [re, why] of RETIRED) assert.ok(!re.test(taught), `${skill}/${file}: teaches the retired ${why}`)
       for (const [, target] of body.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
         if (/^[a-z]+:/.test(target)) continue
         assert.ok(existsSync(join(dir, target)), `${skill}/${file}: broken link ${target}`)

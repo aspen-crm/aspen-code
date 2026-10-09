@@ -11,8 +11,8 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **The instance directory's `AGENTS.md` (written by `aspen init`) owns layout and naming.**
   Skills point to it and add only what it does not say; don't restate it in a way that can drift.
 - **Never teach a CLI shape that does not exist** (`metacode/`, `.aspen/bin/aspen` in the
-  folder, `./ac validate`, `aspen download`, API-key login). `scripts/validate.mjs` fails on
-  those.
+  folder, `./ac validate`, `aspen download`, API-key login). Nothing checks this for you; read
+  `aspen --help`.
 - **The model never handles a credential.** OAuth login is handed to the user; no `--api-key`.
   `instance-migration` signs in through the browser for each command (`scripts/signin.mjs`); the
   token lives only in that process's memory and is never written.
