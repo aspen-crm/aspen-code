@@ -10,8 +10,18 @@ needs the other.
 
 Still **0.0.x**: in use, but the version says what it says.
 
-**Setting up?** Point Claude Code or Codex at [setup/README.md](setup/README.md). It installs the
-plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
+## Setting up
+
+Start `claude` (or `codex`) in the folder where your Aspen project should live, e.g. `~/Aspen`,
+and paste this:
+
+```text
+Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. My Aspen instance is https://<host>/<domain>/<instance>.
+```
+
+It installs the plugin and the Aspen CLI, hands you the sign-in, creates the instance directory
+and its dependencies, and gives you the first prompt. [setup/README.md](setup/README.md) is the
+document it follows; a person can work it too.
 
 ## What it does
 
