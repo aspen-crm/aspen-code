@@ -3,10 +3,12 @@
 The Claude Code and Codex plugin for building on an Aspen instance with the **aspenup** CLI
 (`aspen login` / `init` / `compile` / `doctor` / `move`).
 
-> **Internal testing (0.0.x).** This replaces `aspen-code@aspen` from
-> [aspen-tools](https://github.com/aspen-crm/aspen-tools) (2.8.x), which targets the Builder-era
-> CLI. Production users are unaffected: it is a separate marketplace. When it is ready it will be
-> promoted into aspen-tools and the old versions deprecated — see [Promotion](#promotion).
+This repository is the authoring lane: the model, the code, and deploying them. Working a
+live instance's records instead — view, search, report, create, update — is the separate
+`aspencrm-ai` plugin in [aspen-tools](https://github.com/aspen-crm/aspen-tools). Neither
+needs the other.
+
+Still **0.0.x**: in use, but the version says what it says.
 
 **Setting up?** Point Claude Code or Codex at [setup/README.md](setup/README.md). It installs the
 plugin and the Aspen CLI, gets you signed in, and gives you the first prompt.
@@ -71,18 +73,19 @@ controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 
-Not in 0.0.1: the other guard hooks from 2.8.x.
+Not in 0.0.1: the remaining guard hooks.
 
-## Install (testers)
-
-**Uninstall the production plugin first**, or you will have two sets of Aspen skills:
+## Install
 
 | | Claude Code | Codex |
 |---|---|---|
-| Remove prod | `/plugin uninstall aspen-code@aspen` | `codex plugin remove aspen-code@aspen` |
-| Add this marketplace | `/plugin marketplace add aspen-crm/aspen-code` | `codex plugin marketplace add aspen-crm/aspen-code` |
+| Add the marketplace | `/plugin marketplace add aspen-crm/aspen-code` | `codex plugin marketplace add aspen-crm/aspen-code` |
 | Install | `/plugin install aspen-code@aspen-code` | `codex plugin add aspen-code@aspen-code` |
 | Update | `/plugin marketplace update aspen-code` | `codex plugin marketplace upgrade aspen-code` |
+
+**Already have `aspen-code@aspen`?** That was the Builder-era CLI path, shipped from aspen-tools
+and no longer offered there. Uninstall it first or you will have two sets of Aspen skills:
+`/plugin uninstall aspen-code@aspen`, or `codex plugin remove aspen-code@aspen`.
 
 No git? Claude Code can add `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json`
 instead, which installs the latest release zip; [setup/README.md](setup/README.md) covers Codex.
@@ -91,8 +94,6 @@ Then start a **new** session. In Codex, review and trust the plugin's hook (plug
 not trust hooks); without it the skills still work, and the model checks the CLI itself.
 
 Try: *"Set me up to build on my Aspen instance."*
-
-To go back to production: uninstall `aspen-code@aspen-code`, reinstall `aspen-code@aspen`.
 
 ## Develop
 
@@ -109,16 +110,6 @@ validator fails if they differ.
 
 **Releasing:** publish a GitHub release tagged `v<version>`. The `release` workflow attaches
 `aspen-code.zip`, which the no-git marketplace (`setup/marketplace.json`) installs from.
-
-## Promotion
-
-When 0.x is ready for production:
-
-1. Copy `plugins/aspen-code/` over `plugins/aspen/code/` in aspen-tools, set the version to the
-   next major above the current prod line (3.0.0), and release it there. Testers switch back to
-   `aspen-code@aspen`; the plugin name stays `aspen-code`, so nothing else changes for users.
-2. Deprecate the 2.x line in aspen-tools' release notes and README (the Builder-era CLI path).
-3. Archive this repository, or keep it as the pre-release channel.
 
 ## License
 
