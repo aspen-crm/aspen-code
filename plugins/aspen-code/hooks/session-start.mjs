@@ -5,8 +5,9 @@
 //
 //   1. Is the aspen CLI installed?        PATH, then aspenup's own proxy dir (~/.aspen/bin).
 //   2. Is anyone logged in, and to what?  The `instance` field of aspen's credentials.json.
-//                                         The secret itself is in the OS keyring; this file
-//                                         only names the instance, and we read nothing else.
+//                                         The secret is in the OS keyring (or, only if the
+//                                         user chose file storage, here too); we read nothing
+//                                         but `instance`.
 //   3. Is the session in an instance      `.aspen/config.toml`, which `aspen init` writes,
 //      directory, and for which instance? in the working directory or one above it.
 //
@@ -14,6 +15,12 @@
 // `aspenup self update` (the launcher, a no-op when already the promoted release) and, in an
 // instance directory, `aspenup update` (the toolchain that instance serves). The hook itself
 // stays offline, so it cannot tell whether an update exists -- the commands answer that.
+//
+// In an instance directory the note also compares two releases, both read from disk: the one
+// this plugin's skills are verified against (`xplatform.json`, written by
+// scripts/pin-xplatform.mjs) and the one the directory's instance last reported serving
+// (aspenup's `version-check.json`: instance URL to pversion, no secret). When they differ the
+// skills may be wrong for that instance, and the CLI and installed SDK are the authority.
 //
 // Missing CLI or missing login: say so, and route to `getting-started`, in every session --
 // that is the onboarding prompt. Logged in to a different instance than the directory's: say
@@ -27,7 +34,7 @@
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const isWindows = process.platform === 'win32'
 const INSTALL = isWindows
@@ -117,10 +124,31 @@ export function missingDependencies (dir, env = process.env, home = homedir()) {
   return missing
 }
 
-// Instance URLs compare without a trailing slash; the CLI normalizes to one, a human rarely types it.
-const sameInstance = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase()
+// The name the CLI knows an instance by (`local_name` in its project/location.rs): the
+// domain/instance its URL path names, or its host when the path is empty. A vanity host and the
+// canonical one are the same instance to it.
+const localName = (url) => {
+  try { const u = new URL(url); return (u.pathname.replace(/^\/+|\/+$/g, '') || u.hostname).toLowerCase() } catch { return url.replace(/\/+$/, '').toLowerCase() }
+}
+export const sameInstance = (a, b) => localName(a) === localName(b)
 
-export function context ({ cwd = process.cwd(), env = process.env, home = homedir() } = {}) {
+// The x-platform release this plugin is pinned to, or null.
+export function pin (path = join(dirname(fileURLToPath(import.meta.url)), '..', 'xplatform.json')) {
+  try { return JSON.parse(readFileSync(path, 'utf8')) } catch { return null }
+}
+
+// The release (`26.4.1`) the instance last reported serving to aspenup, or null when it never
+// has. A local build reports 99.9.9, which names no release.
+export function servedRelease (instance, env = process.env, home = homedir()) {
+  try {
+    const checks = JSON.parse(readFileSync(join(nonBlank(env.ASPEN_HOME) || join(home, '.aspen'), 'version-check.json'), 'utf8'))
+    const seen = Object.entries(checks).find(([url]) => sameInstance(url, instance))?.[1]
+    const release = /^(\d+\.\d+\.\d+)(?:-|$)/.exec(seen?.pversion ?? '')?.[1]
+    return release && release !== '99.9.9' ? release : null
+  } catch { return null }
+}
+
+export function context ({ cwd = process.cwd(), env = process.env, home = homedir(), pinned = pin() } = {}) {
   const cli = findCli(env, home)
   if (!cli) {
     return [
@@ -157,6 +185,10 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
   lines.push(update(true))
+  const served = here.instance && pinned?.release ? servedRelease(here.instance, env, home) : null
+  if (served && served !== pinned.release) {
+    lines.push(`This instance serves x-platform ${served}, but this plugin is pinned to ${pinned.release}: its skills' CLI, SDK, metadata and API facts are verified for ${pinned.release} only. Where a skill disagrees with \`aspen <command> --help\`, \`aspen doctor\` or the installed SDK, those win; tell the user once.`)
+  }
   const deps = missingDependencies(here.dir, env, home)
   if (deps.length) {
     lines.push(`Build dependencies not installed yet: ${deps.join(', ')}. Offer to install them before any compile — \`getting-started\` step 4 (its \`install-deps.mjs\` shows the plan first).`)

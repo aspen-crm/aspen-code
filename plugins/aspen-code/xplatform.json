@@ -1,0 +1,26 @@
+{
+  "release": "26.4.1",
+  "branch": "release/26.4.1",
+  "commit": "643b0e55d66c17dbea5a1cad1e47e3a0787f3800",
+  "committed": "2026-10-09",
+  "cli": "26.4.1",
+  "metadata": "26.4.1",
+  "api": "24.3",
+  "rust": {
+    "channel": "1.98.1",
+    "target": "wasm32-wasip2"
+  },
+  "init": {
+    "sdk": "0.1.0"
+  },
+  "sdk": {
+    "aspen-crm": "0.1.0"
+  },
+  "ui": {
+    "@aspen-crm/sdk": "0.2.0",
+    "@aspen-crm/x-cli": "0.2.0",
+    "pversion": "26.4.1",
+    "node": "^24.11.1",
+    "npm": "^11.6.2"
+  }
+}

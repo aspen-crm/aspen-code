@@ -7,7 +7,8 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 
 - **The CLI is the authority.** Every verb, flag and path a skill states must be one the current
   CLI has: check `aspen <command> --help`, and when behavior matters, the CLI source
-  (`app/server/packages/aspen/src` in x-platform). If a skill disagrees with the CLI, fix the skill.
+  (`app/server/packages/aspen/src` in x-platform, at the pinned release). If a skill disagrees
+  with the CLI, fix the skill.
 - **The instance directory's `AGENTS.md` (written by `aspen init`) owns layout and naming.**
   Skills point to it and add only what it does not say; don't restate it in a way that can drift.
 - **Never teach a CLI shape that does not exist** (`metacode/`, `.aspen/bin/aspen` in the
@@ -29,6 +30,11 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **Installing is consented, planned and idempotent.** `install-deps.mjs` prints its plan by
   default, installs project dependencies only with `--run` and machine-wide tools only with
   `--machine`, and skips anything already satisfied. Keep new install steps to that shape.
+- **One pinned x-platform release.** `plugins/aspen-code/xplatform.json` (written by
+  `scripts/pin-xplatform.mjs` from a release branch) is the release every skill is verified
+  against: CLI, metadata, App API, Rust toolchain, SDK crate and npm packages. Check a claim
+  against that ref's source (`git show origin/release/<x.y.z>:<path>`), not `main`. Never
+  hand-edit the pin; re-pin, then re-verify the skills.
 - **Bump the version in both manifests** on every shipped change.
 
 ## Verify before "done"

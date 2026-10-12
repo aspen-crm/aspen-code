@@ -67,4 +67,7 @@ Other keys on a field entry:
   blank on insert and filled in by a second pass.
 - System fields (`id_p`, `cb_p`, `ct_p`, `mb_p`, `mt_p`, `st_p`) cannot be written. `draft`
   leaves them out, and it sets file fields to `drop`: files are not migrated.
+- A target field the describe marks `read-only` (an increment, a converted currency, or a field
+  the initial lifecycle state locks) gets a `todo` from `draft`: drop it or map elsewhere.
+- A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.

@@ -30,7 +30,12 @@ Audit, highest severity first:
    `number` without string `min-value`/`max-value`; `indexed` on an id, polyid, checkbox or long
    text; a polyid missing its companion fields; any file carrying `mtype` or `namespace`; an
    overlay carrying an identifying attribute such as a layout's `object`; a platform `_p` section
-   or field copied into an overlay by `name` instead of referenced with `extends`.
+   or field copied into an overlay by `name` instead of referenced with `extends`; an overlay the
+   platform refuses (any overlay of an object with `extensibility: locked`; a custom object type on
+   a `limited` one; an attribute its `locks` lock, such as `fields` on `email_p` or a platform
+   field's `active`); a `_c` layout for a
+   platform object instead of an extension of its platform layout; a new field on an object with
+   object types not listed on each `object_type_p`.
 5. **Unreachable** — a new `_c` object without a layout, list view, and a tab in a collection.
 6. **Unreviewable** — anything you could not compare against a layer; say what and why.
 

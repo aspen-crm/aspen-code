@@ -23,14 +23,16 @@ at all.
   (`metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or `active/` /
   `platform/`). The `RecordFieldValue` variant you read or write follows the field's metadata, not
   what you would guess.
-- **Start from `trigger-patterns.rs`** beside this file: six handlers that fired on a real
-  instance, plus the helpers they share. It builds unchanged against the scaffolded crate (with
-  `jiff = "0.2"` added). Copy the helpers and the one handler closest to yours.
+- **Start from `trigger-patterns.rs`** beside this file: six handlers plus the helpers they share,
+  checked against the SDK source and the platform objects but not deployed in that form. It
+  builds unchanged against the scaffolded crate (with `jiff = "0.2"` added and its registration
+  as `aspen.server.json`). Copy the helpers and the one handler closest to yours.
 - **Read `rust-trigger-notes.md`** for what the docs leave out: the toolchain pin and lockfile, the
   variant per field type (polyids and their discriminators), `.failures()` on writes, date
-  arithmetic, and the ordered checklist for a trigger that "isn't firing".
-- **Querying?** `query-notes.md` first — one line only, at most 100 rows back, `CURRENT_USER()`
-  and `LIKE` limits. Never interpolate request-supplied text into a statement.
+  arithmetic, which platform objects can have triggers, and the ordered checklist for a trigger
+  that "isn't firing".
+- **Querying?** `query-notes.md` first — `LIMIT` at most 1000, `OFFSET` at most 10000,
+  `CURRENT_USER()` and `LIKE` limits. Never interpolate request-supplied text into a statement.
 - The `aspen-crm` crate source is the final word on types: after the first build it is at
   `~/.cargo/registry/src/*/aspen-crm-*/src/`.
 
@@ -68,14 +70,19 @@ interfaces; see the *Web API* docs page).
 
 ## 2. Rules the docs do not state
 
-- `object` and `events` in `aspen.server.json` are not checked against metadata — a typo compiles,
-  deploys, and never runs.
-- **On `before_update` / `after_update` the batch holds only changed fields.** Read anything else
-  with a query on `id_p` (which `record.get("id_p")` always returns).
+- `events` are checked at compile time (`entrypoints!` rejects an unknown event). `object` is not
+  checked against metadata: a typo compiles, deploys, and never runs. Neither does a trigger on a
+  platform (`_p`) object outside the trigger allow-list in `rust-trigger-notes.md`.
+- **On `before_update` / `after_update` the batch holds the fields the caller sent**, possibly
+  unchanged, plus `id_p`. A field being present does not prove it changed. Read the stored row
+  with a query on `id_p` (in a before-trigger it is still the old one).
+- **Never write to the records the trigger is running on.** The platform refuses that nested
+  write and the user's whole save fails. Derive a value on the record itself in
+  `before_insert`/`before_update` with `record.set`; it lands in the same write.
 - **Batch your work:** collect across the whole batch, then at most one insert and one update per
   object. N records is one round trip, not N.
-- **A trigger that writes back to its own object needs a write-only-on-change guard**, or it
-  re-fires itself.
+- **A trigger that writes other records of its own object needs a write-only-on-change guard**,
+  or it re-fires itself on them.
 - The only output a user or caller sees is a rejection — field error, record error, or `Err`
   (step 1). Log lines are not readable from the CLI.
 

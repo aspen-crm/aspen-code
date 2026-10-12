@@ -91,17 +91,19 @@ in their terminal before writing it to a file. You never see it either way.
 **Check:** `aspen doctor` in the instance directory reports `instance.logged-in` and
 `instance.credential-accepted` as `ok`. Before a directory exists, read the `instance` field of
 `~/.config/aspen/credentials.json` (Windows: `%APPDATA%\aspen\credentials.json`) — it names the
-instance and holds no secret. Read only that field.
+instance, and holds no secret unless the user chose file storage. Read only that field.
 
 ## 3. Create the instance directory — `aspen init`
 
 What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matters here:
 
-- It needs the login, and it names the directory after the instance. **Ask where it should go**
-  (e.g. `~/Aspen`), then `aspen init --dir <there>`.
-- It refuses a non-empty directory that is not already an instance directory, and never
-  overwrites a file. Run again from **inside** an instance directory, it completes a fresh clone or
-  refreshes the fetched `platform/` and `active/` layers.
+- It needs the login, and it creates the directory, named after the instance, **under** the one
+  you give it. **Ask where it should go** (e.g. `~/Aspen`), then `aspen init --dir ~/Aspen`, which
+  creates `~/Aspen/<domain>_<instance>`.
+- It refuses only when that instance-named folder already holds files and no
+  `.aspen/config.toml`; the parent may hold anything. It never overwrites a file you authored. Run
+  again from **inside** an instance directory, it completes a fresh clone or refreshes the fetched
+  `platform/` and `active/` layers.
 - Afterwards the session should work **in** that directory: tell the user to reopen the host there
   (or `cd` for your commands, and say you did). Suggest `git init` and a first commit.
 
@@ -144,7 +146,7 @@ node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rust
 ## 5. Check the directory — `aspen doctor`
 
 ```sh
-aspen doctor            # JSON under an agent; one {id, status, message, fix} per check
+aspen doctor            # JSON under an agent; one {id, section, status, message, fix?} per finding
 ```
 
 Exit 1 means at least one `problem`. After step 4 every `toolchain.*`, `rust.*` and

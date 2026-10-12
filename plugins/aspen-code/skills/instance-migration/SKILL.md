@@ -7,8 +7,8 @@ description: Use when moving records from one Aspen instance to another — migr
 
 Copy records from a **source** Aspen instance into the **target** instance whose directory you
 are in. `scripts/migrate.mjs` beside this file does the mechanics: describe, page, batch, remap
-ids, resume. You and the user decide the mapping. Everything written to the target is
-permanent: nothing on Aspen deletes.
+ids, resume. You and the user decide the mapping. This skill never deletes, so treat everything
+it writes to the target as permanent.
 
 ```sh
 M="<this skill's dir>/scripts/migrate.mjs"
@@ -18,6 +18,10 @@ node "$M" --help
 The script uses the REST API; the CLI has no data commands. There is no upsert, and `id_p`
 cannot be set, so every target record gets a new id. The workspace's id map connects the two
 and makes a re-run skip what is already loaded.
+
+Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object whose describe says
+`deletable: true`), but only as a separate step the user asks for and approves. The script has no
+delete command; don't add one, and don't offer a delete as the fix for a bad load.
 
 ## Sign-in
 
@@ -89,6 +93,6 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 |---|---|
 | "I'll list the options and let the user pick" | Propose one per row. They answer yes once, not twelve times. |
 | "I'll upsert on the legacy id" / "add `legacy_id_c` everywhere" | No upsert; the id map makes a re-run safe, and a field is permanent. |
-| "I'll skip the pilot" | A bad full load cannot be deleted. |
+| "I'll skip the pilot" | This skill cannot undo a bad full load. |
 | "The pilot will show whether the target accepts it" | The pilot writes permanent records. It is not a test: settle the value with the user first. |
-| "The load failed, so I'll clear the target and reload" | Nothing deletes. Fix the mapping and run again. |
+| "The load failed, so I'll clear the target and reload" | This skill never deletes. Fix the mapping and run again; the id map skips what loaded. |

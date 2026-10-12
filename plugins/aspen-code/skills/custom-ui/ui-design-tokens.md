@@ -14,7 +14,8 @@ For a select, lookup or date control, build it from [controls.md](controls.md), 
 [aspen-icons.ts](aspen-icons.ts); a hook denies the native `<select>`, `<datalist>` and date or time
 `<input>` that would stand in for one.
 For a new or changed control, inspect a native example in the running instance when available,
-including its open/edit state. Then pick its token family from `ui-component-tokens.md` and read that family's `.d.ts`.
+including its open/edit state. Then pick its token family from `ui-component-tokens.md` and read that family's `.d.ts`
+(SDK 0.2.0; on 0.1.0 take the names from `controls.md` or a native element).
 Keep a short implementation note of the counterpart and shared helper chosen; no new approval
 step or user-facing design document is required.
 
@@ -79,24 +80,26 @@ gap. Do not report "matches Aspen" based on token lint, a successful deploy, or 
 - `definePage`/`defineLayoutSection` (from `@aspen-crm/sdk`) hand you one bare `element` and take
   back `{ unmount }`. Plain DOM, or a framework root you mount yourself — the SDK's own docstring
   shows `createRoot(element)`. The public export surface is those two functions,
-  `@aspen-crm/sdk/navigation`, `@aspen-crm/sdk/request`, and (on SDK versions `>=0.2.0`) — the typed
-  token modules `@aspen-crm/sdk/tokens/*` (see
-  [Typed token modules](#typed-token-modules)). Check `exports` in the installed SDK's
-  `package.json` rather than assuming.
-  - If the project is on a version of the SDK prior to 0.2.0, it will need to be upgraded in order to
-    function on the latest release of Aspen. Inform the user to update their CLI and SDK versions.
+  `@aspen-crm/sdk/navigation` (`navigate`, `createHref`, `location`, `shouldInterceptLinkClick`),
+  `@aspen-crm/sdk/request`, and, on SDK 0.2.0 only, the typed token modules
+  `@aspen-crm/sdk/tokens/*` (see [Typed token modules](#typed-token-modules)). Check `exports` in
+  the installed SDK's `package.json` rather than assuming.
+  - A directory `aspen init` scaffolded on 26.4.1 has SDK 0.1.0, which ships no token snapshot,
+    and the platform does not render its pages. Tell the human before building one, and never
+    change the pins (`SKILL.md`, "Before the first file").
 - **Those inspected SDK versions expose no component library to import.** Component token
   families (`--ap-comp-button-*`, etc.) are token namespaces, not component modules. Check the installed SDK's public
   exports once when starting UI work, and again after an SDK upgrade. Prefer supported platform
   components when available. Otherwise use shared local controls that satisfy the requirements
   above; default styling from a third-party library is not Aspen styling. Describe local controls
   accurately as local implementations, not native platform components.
-- **The installed SDK defines which token names exist.** Each `@aspen-crm/sdk` version ships a
-  snapshot of its Public tokens (`dist/tokens.css`, named by `tokenStyleSheetFilePath` in
-  `dist/manifest.json`) and typed modules generated from it (`dist/tokens/sem/*.d.ts`,
-  `dist/tokens/comp/*.d.ts`). The platform renders the page with that snapshot, so a name is real
-  when the installed SDK defines it — not when this file lists it. The build enforces this for
-  stylesheets; see [Build check](#build-check).
+- **On SDK 0.2.0, the installed SDK defines which token names exist.** It ships a snapshot of its
+  Public tokens (`dist/tokens.css`, named by `tokenStyleSheetFilePath` in `dist/manifest.json`)
+  and typed modules generated from it (`dist/tokens/sem/*.d.ts`, `dist/tokens/comp/*.d.ts`). The
+  platform renders the page with that snapshot, so a name is real when the installed SDK defines
+  it — not when this file lists it. x-cli 0.2.0 enforces this for stylesheets; see
+  [Build check](#build-check). SDK 0.1.0 ships none of this; see "SDK without a snapshot" under
+  [How to use these tokens](#how-to-use-these-tokens).
 - **Eleven per-role font-family tokens exist and are internal**: `--ap-sem-font-family-body-bold`,
   `-body-large`, `-body-small`, `-caption`, `-display`, `-footnote`, `-heading-1`, `-heading-2`,
   `-heading-3`, `-heading-4`, `-label`. They resolve, and component typography tokens alias them,
@@ -139,10 +142,10 @@ You reference them with `var(...)` in your own stylesheets.
 
 Rules that matter:
 
-- **The SDK supplies them.** The page's installed `@aspen-crm/sdk` version carries the token
-  snapshot, and the platform injects it into the shadow root the page renders in. CSS references
-  them with `var(...)` and imports nothing; JS imports the typed modules below. Upgrading the SDK
-  is what picks up new or changed tokens.
+- **The SDK supplies them.** On SDK 0.2.0 the page's installed `@aspen-crm/sdk` carries the token
+  snapshot, and the platform injects it into the shadow root the page renders in; the host's own
+  tokens never inherit into the page. CSS references them with `var(...)` and imports nothing; JS
+  imports the typed modules below. Upgrading the SDK is what picks up new or changed tokens.
 - **Never hardcode a hex color, size, or shadow.** Use the token. This is enforced: a hardcode on a property the system publishes
   a token for — color, spacing, radius, border width, the type scale, elevation — is denied by a
   hook when you write it, and by `scripts/lint-ui-tokens.mjs` beside this file (run it in CI). What the system publishes no
@@ -159,25 +162,29 @@ Rules that matter:
   `p-4`) and its component CSS classes are NOT available inside your custom UI. Style your own
   markup with these tokens.
   - Why the tokens get through when the classes do not: custom UI renders in a **shadow root on
-    the platform document**, and the platform injects the SDK's token snapshot into it, while its
-    own stylesheets stay outside the tree. (Only the JavaScript is iframe-isolated.)
+    the platform document**, and the platform injects the SDK's token snapshot into it (SDK
+    0.2.0), while its own stylesheets stay outside the tree. (Only the JavaScript runs in the
+    hidden iframe.)
     Your code is isolated from the platform's own CSS and variables (**including resets**), so the
     guest starts at `box-sizing: content-box`; see
     [Typography and composition requirements](#typography-and-composition-requirements).
-- **Names are validated at build time; see [Build check](#build-check).** So do not write the
-  light value as a fallback (`var(--ap-sem-color-text-primary, #11171d)`) in new code: it only
-  ever guarded against typos the build could not see, and it now sees them in CSS, while JS uses
-  the typed modules. Existing fallbacks are harmless and need not be removed.
-- **Older SDK without a snapshot?** If `node_modules/@aspen-crm/sdk/dist/manifest.json` has no
-  `tokenStyleSheetFilePath`, none of the validation below applies: the page inherits the host's
-  current tokens, a misspelled name silently does nothing, and there are no token modules or
-  `.d.ts` files to read names from. For a select, lookup, date field or button, copy the names in
-  [controls.md](controls.md) — each one is checked against the platform's own token list. For
-  anything else, read names off a native element in the running instance
-  (computed styles in browser devtools), copy them exactly, and keep the light-value fallback. A newer `x-cli` fails the
-  build against such an SDK; tell the human the SDK needs upgrading rather than upgrading it
-  yourself. (`typescript/package.json` pins `@aspen-crm/sdk` and `@aspen-crm/x-cli` to the
-  release the instance serves; the instance directory's `AGENTS.md` says to raise them together.)
+- **With SDK and x-cli 0.2.0, names are validated at build time; see [Build check](#build-check).**
+  There, do not write the light value as a fallback (`var(--ap-sem-color-text-primary, #11171d)`)
+  in new code: it only ever guarded against typos the build could not see, and it now sees them
+  in CSS, while JS uses the typed modules. Existing fallbacks are harmless and need not be
+  removed.
+- **SDK without a snapshot (0.1.0)?** If `node_modules/@aspen-crm/sdk/dist/manifest.json` has no
+  `tokenStyleSheetFilePath`, there is no snapshot, no token modules, no `.d.ts` to read names
+  from, and no build or hook check of names: a misspelled name passes silently. The host's tokens
+  do not inherit into the page, and the platform refuses to render it; tell the human before
+  building one (`SKILL.md`, "Before the first file"). If they still want the code written: for a
+  select, lookup, date field or button, copy the names in [controls.md](controls.md) — each one
+  is checked against the platform's own token list. For anything else, read names off a native
+  element in the running instance (computed styles in browser devtools), copy them exactly, and
+  keep the light-value fallback. x-cli 0.2.0 fails the build against such an SDK. Never raise the
+  pins yourself: `typescript/package.json` pins `@aspen-crm/sdk` and `@aspen-crm/x-cli` exactly,
+  `aspen doctor` expects the version this CLI scaffolds, and the instance directory's `AGENTS.md`
+  says to raise them together.
 - **Rebuilding an Aspen component? Take its tokens. Building something new? Compose from the
   semantic layer.** The semantic tokens are the design vocabulary and cover most of a page, so
   they are the right default for anything Aspen does not already publish — a magnitude bar in a
@@ -200,16 +207,17 @@ Rules that matter:
 ### Build check
 
 `aspen compile --typescript` runs the project's own `x-cli build code` (as `npm run build` in
-`typescript/` does). It checks every stylesheet the page imports against the installed SDK's
-snapshot, and fails naming the file and line when a stylesheet:
+`typescript/` does). x-cli 0.1.0 checks no token names. x-cli 0.2.0 checks every stylesheet the
+page imports against the installed SDK's snapshot, and fails naming the file and line when a
+stylesheet:
 
 - references or declares a `--ap-sem-*` or `--ap-comp-*` name the snapshot does not define. The
   error suggests the closest defined name — use it.
 - uses any other `--ap-*` name. The `--ap-` prefix is reserved for Aspen; name your own custom
   properties without it.
 
-It also fails when `@aspen-crm/sdk` is not installed, or when the installed version has no token
-snapshot.
+x-cli 0.2.0 also fails when `@aspen-crm/sdk` is not installed, or when the installed version has
+no token snapshot.
 
 It does **not** check:
 
@@ -221,6 +229,8 @@ The hook and `scripts/lint-ui-tokens.mjs` check names against the same installed
 including in JS and inline styles, and stand down when there is no SDK with a snapshot to read.
 
 ### Typed token modules
+
+SDK 0.2.0 only. 0.1.0 exports no `tokens/*`, and x-cli 0.1.0 does not catch the import.
 
 `@aspen-crm/sdk/tokens/sem` and `@aspen-crm/sdk/tokens/comp` export one namespace per token group.
 Each token is the `var(...)` string for its custom property, typed as that literal, so a name the
@@ -242,12 +252,14 @@ el.style.color = sem.color.textPrimary; // 'var(--ap-sem-color-text-primary)'
   modules are bundled into the page, and a layer import keeps every token of each group it
   touches; a group import keeps only the tokens used.
 - In a stylesheet, keep writing `var(--ap-…)`; the build check covers it.
+- Without a snapshot (SDK 0.1.0), write the `var(--ap-…, <light value>)` string in JS too, with a
+  name from `controls.md` or a native element.
 
 ---
 
 ## Semantic tokens (`--ap-sem-*`)
 
-Names and values are in the installed SDK, one file per group:
+On SDK 0.2.0, names and values are in the installed SDK, one file per group (0.1.0 has none):
 
 ```sh
 ls  typescript/node_modules/@aspen-crm/sdk/dist/tokens/sem/

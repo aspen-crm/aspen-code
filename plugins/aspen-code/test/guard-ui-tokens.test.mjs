@@ -250,6 +250,29 @@ test('the message points at the typed token modules for JS and inline styles', (
   assert.match(reason, /@aspen-crm\/sdk\/tokens\/sem/)
 })
 
+test('with no token snapshot the message points at controls.md and a kept fallback instead', () => {
+  const reason = decide(UI, css('.x { color: #11171d; }'), null)
+  assert.match(reason, /color: #11171d/)
+  assert.match(reason, /ships no token snapshot/)
+  assert.match(reason, /controls\.md/)
+  assert.match(reason, /fallback/)
+  assert.match(reason, /tell the human/)
+  assert.doesNotMatch(reason, /@aspen-crm\/sdk\/tokens\//)
+  assert.doesNotMatch(reason, /dist\/tokens\//)
+  assert.doesNotMatch(reason, /every Public `--ap-\*` token resolves/)
+})
+
+test('an SDK shaped like 0.1.0 (a manifest with no snapshot) gets the no-snapshot message', () => {
+  const project = makeProject({
+    manifest: { distributionName: 'sdk', exports: { '@aspen-crm/sdk': 'index.js' }, source: 'platform' },
+    snapshot: null
+  })
+  const reason = decide(project.page, css('.x { color: var(--ap-sem-color-text-primry); padding: 16px; }'))
+  assert.match(reason, /padding: 16px/)
+  assert.match(reason, /ships no token snapshot/)
+  assert.doesNotMatch(reason, /did you mean/, 'no snapshot, so no name is judged')
+})
+
 // ---- the tool payloads it runs on ---------------------------------------------------
 
 test('content comes off Write, Edit and MultiEdit payloads alike', () => {
@@ -334,6 +357,13 @@ test('the message names the component and where to find its tokens', () => {
   assert.match(reason, /--ap-comp-cell-/)
   assert.match(reason, /dist\/tokens\/comp\/cell\.d\.ts/)
   assert.match(reason, /aspen-component-exempt/)
+})
+
+test('with no token snapshot a rebuilt component is pointed at controls.md, not a .d.ts', () => {
+  const reason = decide(UI, REBUILT_TABLE, null)
+  assert.match(reason, /renders a `table`/)
+  assert.match(reason, /controls\.md/)
+  assert.doesNotMatch(reason, /\.d\.ts/)
 })
 
 test('button, select and textarea are covered too', () => {

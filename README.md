@@ -83,7 +83,7 @@ controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 
-Not in 0.0.1: the remaining guard hooks.
+Not in 0.0.5: the remaining guard hooks.
 
 ## Install
 
@@ -117,6 +117,19 @@ To try a local change: `claude --plugin-dir ./plugins/aspen-code`, or point the 
 your checkout (`/plugin marketplace add ~/path/to/aspen-code`). Bump the version in **both**
 `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` on every change you ship — the
 validator fails if they differ.
+
+**Pinned to x-platform 26.4.1.** [`plugins/aspen-code/xplatform.json`](plugins/aspen-code/xplatform.json)
+names the release every skill is verified against: CLI, metadata, App API, Rust toolchain, the
+`aspen-crm` crate and the `@aspen-crm/sdk` / `@aspen-crm/x-cli` packages. The validator fails on
+any release, `/api/v…` or SDK version in the shipped text that disagrees with it. To re-pin, fetch
+the release branch in an x-platform checkout, then:
+
+```sh
+node scripts/pin-xplatform.mjs ~/src/x-platform origin/release/<x.y.z>          # rewrite the pin
+node scripts/pin-xplatform.mjs ~/src/x-platform origin/release/<x.y.z> --check  # has the branch moved?
+```
+
+and re-verify every skill against that ref before shipping.
 
 **Releasing:** publish a GitHub release tagged `v<version>`. The `release` workflow attaches
 `aspen-code.zip`, which the no-git marketplace (`setup/marketplace.json`) installs from.

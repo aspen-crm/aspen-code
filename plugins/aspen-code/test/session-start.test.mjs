@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { context } from '../hooks/session-start.mjs'
+import { context, pin } from '../hooks/session-start.mjs'
 
 const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'session-start.mjs')
 
@@ -112,6 +112,36 @@ test('an instance directory with no build dependencies says what is missing', t 
   const bin = join(m.home, 'nodebin'); mkdirSync(bin); writeFileSync(join(bin, 'node'), '')
   out = context({ ...m, env: { ...m.env, PATH: `${m.env.PATH}:${bin}` } })
   assert.doesNotMatch(out, /Build dependencies/)
+})
+
+// aspenup's record of what each instance last served, as `aspen` writes it.
+function served (m, url, pversion) {
+  mkdirSync(join(m.home, '.aspen'), { recursive: true })
+  writeFileSync(join(m.home, '.aspen', 'version-check.json'),
+    JSON.stringify({ [url]: { pversion, checked_at: '2026-10-12T13:29:53.059Z' } }))
+}
+
+test('the plugin ships a pin that names a release', () => {
+  assert.match(pin()?.release ?? '', /^\d+\.\d+\.\d+$/)
+})
+
+test('an instance serving a different release than the pin: says the skills may not hold', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  served(m, URL_A.replace(/\/$/, ''), '26.4.2-build10801')
+  const out = context({ ...m, pinned: { release: '26.4.1' } })
+  assert.match(out, /serves x-platform 26\.4\.2, but this plugin is pinned to 26\.4\.1/)
+  assert.match(out, /aspen doctor/)
+})
+
+test('an instance serving the pinned release, a local build, or never checked: no pin note', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  const quiet = (pversion) => {
+    if (pversion) served(m, URL_A, pversion)
+    assert.doesNotMatch(context({ ...m, pinned: { release: '26.4.1' } }), /pinned to/)
+  }
+  quiet(null)
+  quiet('26.4.1-build10715')
+  quiet('99.9.9-build99999')
 })
 
 test('ASPEN_CONFIG_DIR overrides where credentials are read', t => {
