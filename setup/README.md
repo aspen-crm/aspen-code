@@ -79,17 +79,20 @@ lane — and the `aspen` marketplace alone: removing a marketplace uninstalls ev
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.1 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.5 or
 later, enabled.
 
-Already installed? Reinstall it. The version stays 0.0.1 while this channel is in testing, and
-an update only fetches a new version number, so `update` reports "already at the latest
-version" and changes nothing.
+Already installed? Update it. Each release carries a new version number, which is what an update
+fetches.
 
 | Host | Commands |
 |---|---|
-| Claude Code | `claude plugin marketplace update aspen-code`, `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen-code` |
-| Codex | `codex plugin marketplace upgrade aspen-code`, `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen-code` |
+| Claude Code | `claude plugin marketplace update aspen-code`, then `claude plugin update aspen-code@aspen-code` |
+| Codex | `codex plugin marketplace upgrade aspen-code` |
+
+If an update reports "already at the latest version" but the version is older than the latest
+release, reinstall: `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install
+aspen-code@aspen-code` (Codex: `codex plugin remove`, then `codex plugin add`).
 
 Codex installed from the download? Re-run the step 1 download first, in place of the upgrade.
 Restart Claude Code or Codex afterwards.
