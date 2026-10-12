@@ -42,9 +42,15 @@ the Aspen docs (below) on each component type's attributes — read them, don't 
      identifying attributes, such as a layout's `object` ("is locked and cannot be extended").
    - **Child components of an overlay** (a layout's `sections`, an object's `fields`): list only
      your new `_c` children, plus `{"extends": "<platform child>", …changes}` for a platform child
-     you change. Platform children merge in on their own. A platform child copied in by `name` is
-     rejected ("does not match the expected namespace of custom"). Some child attributes are
-     locked too, for example `active` on some platform layout sections.
+     you change. Platform children merge in on their own. Some child attributes are locked too,
+     for example `active` on some platform layout sections.
+   - **A child entry that points at a field is `{name, field}`, and only `name` is namespaced.**
+     `name` must end `_c`: a platform child copied in by `name` is rejected ("does not match the
+     expected namespace of custom"), and `{"extends": "<platform child>"}` works only if that child
+     already exists on the component ("extension for nonexistent component"). `field` may be any
+     field, platform included. So `{"name": "ccode_c", "field": "ccode_p"}` is how a custom
+     overlay reaches a platform field — in an object type, a layout detail section, or a
+     related-list column.
    - **No authored file carries `mtype` or `namespace`**, whether it is new or an overlay
      ("unknown fields: mtype", "namespace field not allowed in input"). The instance `AGENTS.md`
      "Every metadata file" example shows both. That example is wrong (CLI 26.4.1), so leave them out.
@@ -102,11 +108,34 @@ components in `active/`/`platform/`, then the docs, then this skill.
 - **List-view filters have no date offsets** — `TODAY()` and `NOW()` exist, but "next quarter" is
   a static range someone must edit. Say so.
 - **`number` bounds are decimal strings** (`"min-value": "0"`), as platform components write
-  them; a bare integer failed "expected a Decimal type" on a live instance.
+  them; a bare integer fails "expected a Decimal type". A `number` field needs **both**
+  (otherwise it fails "missing field `max-value`" or "`min-value`"); on `currency` both are
+  optional.
+- **A `checkbox` `default-value` is a JSON boolean** (`false`), not the string `"false"`.
 - **A new field on an object with record types** must also be listed in each of its
   `object_type_p`, platform ones included (`account_p.account_p`, all three `team_p` types), or
   typed records reject it ("is not allowed for object type"). On a platform object type, overlay
-  it with `"fields": [{"name": "<field>_c", "field": "<field>_c"}]`.
+  it with `"fields": [{"name": "<field>_c", "field": "<field>_c"}]` for a custom field, or
+  `{"name": "<platform field minus _p>_c", "field": "<platform field>"}` for a platform one.
+- **The platform adds `_p` fields to an object that its object types don't get.** Some
+  attributes add hidden fields when you compile: a `currency` field adds `ccode_p` and `ccdate_p`, for
+  example. The Field docs say system fields are included in every object type, but that is not
+  true of all of them, and nothing fails until a record write: "Field '<x>_p' is not allowed for
+  object type …". After compiling, compare each object type against its object. The
+  standard columns every object has (`id_p` … `otype_p`) are always allowed, so skip them:
+
+  ```sh
+  o=<object>; for t in metadata/compiled/object_type_p/$o.*.json; do
+    jq -r --slurpfile obj metadata/compiled/object_p/$o.json '[.fields[].field] as $in
+      | "\(.name): \(($obj[0].fields | map(select(.active != false).name)) - $in | join(", "))"' "$t"
+  done
+  ```
+
+  Platform object types leave some `_p` fields out on purpose (`product_p.bundle_p` omits
+  `uom_p`), so add only the ones your writes set, as `{"name": "<x>_c", "field": "<x>_p"}`.
+  An entry name must be unique in the object type; if `<x>_c` is already taken, use another
+  free `_c` name, or it fails "Component … is duplicated". Read the field's type before you set
+  it: `ccode_p` takes a `currency_p` record id, not `"USD"`.
 - **`searchable: true` needs a search config** to go with it; default to `false`.
 - **Some platform components refuse an overlay** (26.4.1). Read the object's `extensibility` and
   any component's `locks` in `platform/` before planning:
@@ -120,7 +149,8 @@ components in `active/`/`platform/`, then the docs, then this skill.
     platform layout instead. A layout for your own object type on a platform object is fine.
   - Platform object types, most platform picklists and `aspen_crm_p` take new `_c` entries. Their
     platform entries are locked, except a picklist item's `label`, `description` and usually
-    `active`.
+    `active`, plus `parent-objects` on most object-dependent picklists: widen those rather than
+    forcing data to fit.
 
   Deploy any platform overlay as **its own package**, so one rejection cannot take your custom
   work with it.

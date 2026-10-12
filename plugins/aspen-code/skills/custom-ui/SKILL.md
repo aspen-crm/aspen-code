@@ -61,7 +61,8 @@ need SDK and x-cli 0.2.0.
 - **Picklist values stay technical; visible text uses the item's metadata label.** Keep names such
   as `usd_p` in writes, query predicates, comparisons and option values. Options, cells, badges and
   read-only text show the item's `label` from the field's picklist metadata (`option.value =
-  item.name; option.textContent = item.label`). Never derive a label by stripping `_p`/`_c`,
+  item.name; option.textContent = item.label`). Read it from `POST /describe/picklist_p`; there
+  is no `/metadata/<ctype>` route, and its 404 leaves every label unresolved. Never derive a label by stripping `_p`/`_c`,
   replacing underscores or changing case, and never keep a parallel label table. Keep labels for
   retired items still on records; if a label cannot be resolved, show the value and say the label
   is unavailable rather than guessing.

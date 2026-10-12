@@ -19,6 +19,25 @@ The script uses the REST API; the CLI has no data commands. There is no upsert, 
 cannot be set, so every target record gets a new id. The workspace's id map connects the two
 and makes a re-run skip what is already loaded.
 
+When you call the API yourself, to explore or to check a failure the script reports:
+
+- **Describe is `POST /describe/object_p` with `{"data": [{"name": …, "object-type": …}]}`**;
+  every other body shape returns 422. The fields are not on the returned record: follow its
+  `variant-index` into `supplemental.variants[]`. Pass `object-type` to see the fields a write of
+  that type is checked against.
+- **Read `status` before `data`.** A failed request (a `SELECT` with no `LIMIT`, for example)
+  comes back as HTTP 200 with `status: FAILURE`, `failures`, and no `data`, so code that only
+  reads `data` sees no rows. A 500 has `failures` and no `data` too.
+- **A write returns the new record's id as `id`; a query returns the columns you selected**
+  (`id_p`).
+- **Items in a batch succeed or fail on their own.** The whole batch rolls back only when a
+  trigger errors or an insert breaks a unique constraint.
+- **Triggers create records too.** A contact with `primary_account_p` set gets a
+  `contact_role_p` for that account, with `role_p` blank. Inserting the same pair again breaks
+  `contact_role_chk_p`, which rolls back the batch. Update the record the trigger made instead.
+  A `*_chk_p` field holds its key as plain text (`<contact id>|<account id>`), so you can find
+  that record with a query on it.
+
 Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object whose describe says
 `deletable: true`), but only as a separate step the user asks for and approves. The script has no
 delete command; don't add one, and don't offer a delete as the fix for a bad load.

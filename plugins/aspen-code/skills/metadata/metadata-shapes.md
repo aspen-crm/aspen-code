@@ -24,9 +24,13 @@ or `tab_p` behaves unlike its JSON suggests.
 - `query-filter` takes `CURRENT_USER()` and dot-walked predicates (on `team_role_p`:
   `team_p.user_p = CURRENT_USER()`); the AQL rules in `../server-code/query-notes.md` apply.
 - A dotted `"field": "product_p.sku_p"` failed "unresolved reference" on a live instance: a
-  `field` column names one field. Dot-walking is a `relationship` column (`field` = the lookup
-  hop, `expression` = the path, `relationships` = target object and field) — the docs have the
-  shape.
+  `field` column names one field. Dot-walking is a `relationship` column that carries **only**
+  `expression` (the path, `product_p.sku_p`). `field` and `relationships` are derived from it at
+  check-in, and authoring either fails "must not be specified; it is derived from 'expression'".
+  This is the same for a layout section's columns.
+- A hop through a polyid names the target object with `->`:
+  `customer_p->account_p.industry_c`.
+- A list view's `sort` names a **column** by its `name`, not the field the column shows.
 
 ## Reading the instance before you author
 
