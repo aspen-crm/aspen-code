@@ -78,8 +78,7 @@ A green `checkin-deploy` proves the package was accepted, not that it works.
 
 1. `aspen status` — the check-in completed and the code you expect is checked in.
 2. **Exercise it through a real write path.** Confirm the values with the human, then create or
-   update a record: with the user in the Aspen UI, or through the Aspen Runtime MCP
-   (`aspen-cowork`) if it is connected. Read it back.
+   update a record with the user in the Aspen UI. Read it back.
 3. Assert the behavior: the derived field holds the right value; the invalid save is **rejected
    with your message** (that rejection is the proof a validation fired); the new layout, list view
    and tab are reachable from the nav.

@@ -59,16 +59,15 @@ network or proxy trouble. Say so and stop.
 
 ### 2. Remove the old plugin, if it is installed
 
-`aspen-code@aspen` (from `aspen-crm/aspen-tools`, which no longer offers it) defines skills with
-the same names. With both installed, the model gets two sets of Aspen instructions.
+`aspen-code@aspen`, an older copy of this plugin, defines skills with the same names. With both installed, the model gets two sets of Aspen instructions.
 
 | Host | Check | Remove (ask first) |
 |---|---|---|
 | Claude Code | `claude plugin list` shows `aspen-code@aspen` | `claude plugin uninstall aspen-code@aspen` |
 | Codex | `codex plugin list` shows `aspen-code@aspen` | `codex plugin remove aspen-code@aspen` |
 
-Remove only `aspen-code@aspen`. Leave `aspencrm-ai@aspen` — the records plugin, a different
-lane — and the `aspen` marketplace alone: removing a marketplace uninstalls everything from it.
+Remove only `aspen-code@aspen`. Leave the `aspen` marketplace and its other plugins alone:
+removing a marketplace uninstalls everything from it.
 
 ### 3. Install the plugin
 
