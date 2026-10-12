@@ -20,7 +20,7 @@ left.
         { "target": "industry_p", "from": "sector_c", "map": { "tech_c": "technology_p", "bank_c": "financial_services_p" }, "default": null, "note": "user: anything else stays blank" },
         { "target": "parent_account_p", "from": "parent_c", "lookup": "company_c" },
         { "target": "owner_p", "from": "owner_p", "lookup": { "object": "user_p", "match": "email_p" } },
-        { "target": "ccode_p", "value": "USD" },
+        { "target": "ccode_p", "from": "ccode_p", "lookup": { "object": "currency_p", "match": "currency_code_p" } },
         { "from": "legacy_score_c", "drop": true, "note": "user: not needed" }
       ]
     }
@@ -43,7 +43,7 @@ left.
 | Form | Value written |
 |---|---|
 | `"from": "f"` | The source field's value, converted to the string the API expects. |
-| `"value": "USD"` | A constant. `null` leaves the field blank. |
+| `"value": "imported_c"` | A constant. `null` leaves the field blank. |
 | `"from": "f", "map": {…}` | The source value looked up in the table. A value missing from the table is an error unless `default` is set (`null` is allowed). |
 | `"from": "f", "lookup": "obj"` | The target id of the record migrated from `obj`, read from the id map. `obj` must be in this mapping. |
 | `"from": "f", "lookup": ["a", "b"]` | For a field that can point to several objects: the target id from whichever object's id map holds the source id. |
@@ -69,5 +69,7 @@ Other keys on a field entry:
   leaves them out, and it sets file fields to `drop`: files are not migrated.
 - A target field the describe marks `read-only` (an increment, a converted currency, or a field
   the initial lifecycle state locks) gets a `todo` from `draft`: drop it or map elsewhere.
+- `ccode_p` takes a `currency_p` record id, not a code such as `"USD"`: match it by
+  `currency_code_p`, as in the example above.
 - A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.
