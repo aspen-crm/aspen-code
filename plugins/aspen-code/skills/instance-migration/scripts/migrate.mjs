@@ -13,9 +13,9 @@
 //   node migrate.mjs verify <workspace> [--sample N]   counts and a field-by-field sample → reports/verify.md
 //
 // The source is only read: its client has no write method. The target is written only by
-// `load --run`. There is no upsert and `id_p` cannot be set on create, so every target record
-// gets a new id; idmap/<object>.jsonl records source id → target id after every batch, which
-// makes a re-run skip what is already loaded. A lookup to its own object, or to an object that
+// `load --run`, and nothing is ever deleted. There is no upsert and `id_p` cannot be set on
+// create, so every target record gets a new id; idmap/<object>.jsonl records source id → target
+// id after every batch, which makes a re-run skip what is already loaded. A lookup to its own object, or to an object that
 // loads later, is left blank on insert and filled by a second pass.
 //
 // AQL refuses `>` on id_p and caps OFFSET at 10000, so extract pages by created time (ct_p,
@@ -24,12 +24,12 @@
 // Exit codes: 0 done; 1 rows failed, wait on a parent, or differ on verify; 2 bad invocation, the
 // mapping or the instance is not ready, or a sign-in failed.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { SignInError, signIn } from './signin.mjs'
 
-const API = '/api/v24.3'
+const API = `/api/v${pinnedApi()}`
 const PAGE = 1000 // AQL LIMIT cap
 const MAX_OFFSET = 10000 // AQL OFFSET cap
 const MAX_BATCH = 500 // rows per write request
@@ -60,6 +60,17 @@ class Stop extends Error {
   constructor (message, code = 2) { super(message); this.code = code }
 }
 
+// The App API version of the plugin's x-platform pin (xplatform.json `api`); 24.3 when it cannot be read.
+function pinnedApi () {
+  try {
+    const api = JSON.parse(readFileSync(new URL('../../../xplatform.json', import.meta.url), 'utf8')).api
+    if (/^\d+\.\d+$/.test(api)) return api
+  } catch {}
+  return '24.3'
+}
+
+// A WARNING row or batch was applied; only its warnings differ from SUCCESS.
+const applied = (status) => status === 'SUCCESS' || status === 'WARNING'
 const say = (line) => console.log(line)
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const chunks = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n))
@@ -172,7 +183,7 @@ async function describeInstance ({ read }) {
     for (const chunk of chunks(all, 50)) {
       const r = await read(route, { data: chunk.map((name) => ({ name })), filter_inactive: route === '/describe/object_p' }, { partial: true })
       for (const e of r.data ?? []) {
-        const v = e.status === 'SUCCESS' ? r.supplemental?.variants?.[e['variant-index']] : null
+        const v = applied(e.status) ? r.supplemental?.variants?.[e['variant-index']] : null
         if (v) out[e.name] = v
       }
     }
@@ -188,6 +199,7 @@ async function describeInstance ({ read }) {
         subtype: f.subtype ?? null,
         required: !!f.required,
         unique: !!f.unique,
+        readOnly: !!f['read-only'], // platform-generated (increment, converted currency) or locked in the initial state
         lookup: f.relationship ?? null,
         objects: f['allowed-objects'] ?? null,
         picklist: f.picklist ?? null
@@ -220,7 +232,9 @@ function draftObject (name, src, tgt, migrating) {
     }
     const e = { target: fname, from: fname }
     const refs = f.lookup ? [f.lookup] : f.objects ?? []
-    if (tf.type !== f.type) {
+    if (tf.readOnly) {
+      e.todo = `${fname} is read-only on ${target}: drop it ("drop": true) or map the value to another field`
+    } else if (tf.type !== f.type) {
       e.todo = `types differ: ${f.type} on the source, ${tf.type} on the target`
     } else if (refs.length) {
       const out = refs.filter((r) => !migrating.has(r))
@@ -408,7 +422,7 @@ async function writeBatches (write, method, object, items, size, done) {
       for (const i of chunk) done(i, null, { field: '(batch)', kind: `batch rejected: ${why.slice(0, 160)}`, detail: why })
       continue
     }
-    data.forEach((d, k) => d.status === 'SUCCESS'
+    data.forEach((d, k) => applied(d.status)
       ? done(chunk[k], d.id ?? chunk[k].values.id_p, null)
       : done(chunk[k], null, { field: '(record)', kind: `rejected: ${(failureText(d) || 'no reason given').slice(0, 160)}`, detail: failureText(d) }))
   }
@@ -752,7 +766,9 @@ async function run (cmd, ws, m, opts, open) {
   return verify(ws, m, target, opts)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Compared by real path: run through a symlinked directory (macOS /var, a plugin cache), the
+// module URL is the resolved one.
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main(process.argv.slice(2)).then(
     (code) => { process.exitCode = code },
     (e) => { const known = e instanceof Stop || e instanceof SignInError; console.error(known ? e.message : (e?.stack ?? String(e))); process.exitCode = known ? e.code : 1 }

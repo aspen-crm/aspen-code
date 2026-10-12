@@ -92,23 +92,38 @@ components in `active/`/`platform/`, then the docs, then this skill.
   of an overlay, because they merge in through `extends`. Reordering is fine.
 - **An object is not reachable until it has a layout, a list view, and a tab placed in a tab
   collection.** After creating one, check all four exist.
-- **Extending a tab collection replaces its custom children.** Its `tabs` list must include every
-  existing custom tab (read them from `active/`), or check-in fails with "Child components must
-  not be dropped". Usually simpler: author your own `tab_collection_p` listing the platform tabs you
-  want beside yours.
-- **A tab surfaces only its `default-list-view`**; a second list view on the same tab is
-  unreachable.
-- **List-view filters have no relative dates** — "next quarter" is a static range someone must
-  edit. Say so.
-- **`number` bounds are decimal strings** (`"min-value": "0"`); a bare integer fails "expected a
-  Decimal type". Copy the form real components use.
-- **A new field on an object with record types** must also appear in each `object_type_p`, or
-  typed records reject it.
+- **An overlay's custom children are the whole custom list.** A tab collection overlay (e.g. adding
+  your tabs to `aspen_crm_p`) must keep listing every custom tab already deployed (read them from
+  `active/`), or check-in fails with "Child components cannot be dropped". Its platform tabs are
+  locked: you add beside them, never change them.
+- **A tab opens on its `default-list-view`.** Other active list views on the same object and tab
+  are reachable only from the Saved Views panel (or `?view=<list view name>`), so put the view
+  people need daily in `default-list-view`.
+- **List-view filters have no date offsets** — `TODAY()` and `NOW()` exist, but "next quarter" is
+  a static range someone must edit. Say so.
+- **`number` bounds are decimal strings** (`"min-value": "0"`), as platform components write
+  them; a bare integer failed "expected a Decimal type" on a live instance.
+- **A new field on an object with record types** must also be listed in each of its
+  `object_type_p`, platform ones included (`account_p.account_p`, all three `team_p` types), or
+  typed records reject it ("is not allowed for object type"). On a platform object type, overlay
+  it with `"fields": [{"name": "<field>_c", "field": "<field>_c"}]`.
 - **`searchable: true` needs a search config** to go with it; default to `false`.
-- **Some platform components refuse any overlay** (observed on 26.3.3: a base object type, a
-  platform picklist such as `task_p.priority_p`, the stock `aspen_crm_p` tab collection). The
-  compiler says so — author a custom one instead. Deploy any platform overlay as **its own
-  package**, so one rejection cannot take your custom work with it.
+- **Some platform components refuse an overlay** (26.4.1). Read the object's `extensibility` and
+  any component's `locks` in `platform/` before planning:
+  - `"extensibility": "locked"` refuses any overlay, even a label: `user_p`, `file_p`,
+    `security_policy_p`, `contact_channel_p`, `contact_rel_p`, `contact_merge_p`,
+    `join_request_p`, the `miner_*_p` objects.
+  - `"limited"` (`activity_p`, `email_p`, `meeting_p`) refuses custom object types; `email_p` and
+    `meeting_p` also lock `fields`, so no new fields.
+  - A platform field cannot be retired: its `active` is locked.
+  - A `_c` layout for a platform object is refused ("reserved for the platform"): extend the
+    platform layout instead. A layout for your own object type on a platform object is fine.
+  - Platform object types, most platform picklists and `aspen_crm_p` take new `_c` entries. Their
+    platform entries are locked, except a picklist item's `label`, `description` and usually
+    `active`.
+
+  Deploy any platform overlay as **its own package**, so one rejection cannot take your custom
+  work with it.
 - A value derived from other fields is a stored field maintained by a trigger, and a status flow
   is a `lifecycle_p` — see `model-first`.
 - For a set of related objects, fan out to `schema-explorer` to map what exists, and to

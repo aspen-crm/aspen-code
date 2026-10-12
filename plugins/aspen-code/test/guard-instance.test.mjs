@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { decide, evaluate, invocations } from '../hooks/guard-instance.mjs'
+import { sameInstance } from '../hooks/session-start.mjs'
 
 const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'guard-instance.mjs')
 const A = 'https://host.example/acme/dev/'
@@ -102,4 +103,9 @@ test('the hook process fails open on garbage and denies over stdin', t => {
   })
   assert.equal(r.status, 0, r.stderr)
   assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny')
+})
+
+test('a vanity host and the canonical host name the same instance, as the CLI compares them', () => {
+  assert.ok(sameInstance('https://acme.example.com/acme.com/dev/', 'https://0000-01-0101-ip.veevaxdev.com/acme.com/dev'))
+  assert.ok(!sameInstance('https://host.example/acme.com/dev/', 'https://host.example/acme.com/prod/'))
 })

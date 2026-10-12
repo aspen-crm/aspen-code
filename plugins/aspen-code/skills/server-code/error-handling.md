@@ -1,16 +1,18 @@
 # Trigger errors: what the user and the API caller actually get
 
 Read this before asking the developer how a trigger should fail (`SKILL.md` step 1), and when
-writing the rejection code. Everything below was traced through the platform source (x-platform,
-2026-09-27) and its record-trigger tests. The *Record Triggers* docs page covers the SDK calls; it
-does not cover what reaches the caller.
+writing the rejection code. What each mechanism does to the batch, and the error type, subtype,
+detail and field context the Data API returns, are checked against the 26.4.1 platform source and
+its record-trigger tests. The HTTP status, `display_detail` and the record form column were traced
+earlier and not re-checked for this release. The *Record Triggers* docs page covers the SDK calls;
+it does not cover what reaches the caller.
 
 ## The three ways to fail, and where each one lands
 
 | In the trigger | Batch | Record form (UI) | Data API (batch create/update) |
 |---|---|---|---|
-| `record.add_field_error(FieldError::new(field, code, msg))` — before-triggers only | Only that row is rejected; the other rows **commit** | The message under that field. If the field is not editable on the layout (not on it, read-only, locked), it goes to the error banner as `("Label") msg` | HTTP 200, batch `status: FAILURE`; that item: `{status: FAILURE, failures: [{error_type: INVALID_DATA, subtype: UNKNOWN_DATA, detail: msg, context: {field_name: field}}]}` |
-| `record.add_record_error(RecordError::new(code, msg))` — before-triggers and `before_delete` | Only that row is rejected; the other rows commit | The error banner above the form | Same as above, with no `context` |
+| `record.add_field_error(FieldError::new(field, code, msg))` — `before_insert`/`before_update` only | Only that row is rejected; the other rows **commit** | The message under that field. If the field is not editable on the layout (not on it, read-only, locked), it goes to the error banner as `("Label") msg` | HTTP 200, batch `status: FAILURE`; that item: `{status: FAILURE, failures: [{error_type: INVALID_DATA, subtype: UNKNOWN_DATA, detail: msg, context: {field_name: field}}]}` |
+| `record.add_record_error(RecordError::new(code, msg))` — `before_insert`, `before_update`, `before_delete` | Only that row is rejected; the other rows commit | The error banner above the form | Same as above, with no `context` |
 | `Err(..)`, `error::bail!`, or a panic — any trigger | The **whole batch rolls back**, including rows that were fine | An error modal, not the banner | HTTP 200, `{status: FAILURE, failures: [{error_type: INVALID_DATA, subtype: UNKNOWN_DATA, detail: "before trigger error '<msg>'"}]}` (`after trigger error '…'` from an after-trigger), no `data` |
 
 ## What does not reach anyone
@@ -40,7 +42,9 @@ work failed and the original write must not stand", and agree that with the deve
 ## Failures inside the trigger's own work
 
 A write the trigger issues (`execute_insert` / `execute_update`) can fail per row inside
-`Ok(BatchProcessed)` — see `.failures()` in `rust-trigger-notes.md`. A query can return `Err`.
+`Ok(BatchProcessed)` — see `.failures()` in `rust-trigger-notes.md` — or as a whole-batch `Err`
+(more than 500 records, or a write to the records the trigger is running on, which is always
+refused). A query can return `Err`.
 For each, the developer chooses: fail the user's save (`bail!`, whole batch), reject just the
 affected record (a record error, before-triggers only), or skip and continue (the user's save
 succeeds without the follow-on work — say so in the summary).

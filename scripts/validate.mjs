@@ -70,6 +70,29 @@ export function validatePlugin (root) {
     assert.equal(codexMcp[name].url, server.url, `${name}: URL differs between hosts`)
   }
 
+  // One x-platform release, pinned in xplatform.json (scripts/pin-xplatform.mjs): every release,
+  // App API version and SDK version the shipped text states must be the pinned one.
+  const pin = json(join(root, 'xplatform.json'))
+  assert.match(pin.release, /^\d+\.\d+\.\d+$/, 'xplatform.json: release')
+  assert.match(pin.commit, /^[0-9a-f]{40}$/, 'xplatform.json: commit')
+  assert.equal(pin.cli, pin.release, 'xplatform.json: the CLI ships with the release')
+  assert.equal(pin.metadata, pin.release, 'xplatform.json: metadata ships with the release')
+  assert.match(pin.api, /^\d+\.\d+$/, 'xplatform.json: api')
+  const sdkVersions = { 'aspen-crm': [pin.init.sdk, pin.sdk['aspen-crm']], '@aspen-crm/sdk': [pin.init.sdk, pin.ui['@aspen-crm/sdk']], '@aspen-crm/x-cli': [pin.init.sdk, pin.ui['@aspen-crm/x-cli']] }
+  const shipped = (dir) => readdirSync(dir, { withFileTypes: true, recursive: true })
+    .filter((e) => e.isFile() && /\.(md|rs|ts|mjs)$/.test(e.name)).map((e) => join(e.parentPath, e.name))
+  for (const file of ['skills', 'agents', 'hooks'].filter((d) => existsSync(join(root, d))).flatMap((d) => shipped(join(root, d)))) {
+    const text = readFileSync(file, 'utf8')
+    const where = file.slice(root.length + 1)
+    for (const [, release] of text.matchAll(/(?<![\^\w.@])(\d{2}\.[1-4]\.\d+)\b/g)) {
+      if (release !== '99.9.9') assert.equal(release, pin.release, `${where}: names x-platform ${release}, pinned to ${pin.release}`)
+    }
+    for (const [, api] of text.matchAll(/\/api\/v(\d+\.\d+)\b/g)) assert.equal(api, pin.api, `${where}: App API v${api}, pinned to v${pin.api}`)
+    for (const [, name, version] of text.matchAll(/(aspen-crm|@aspen-crm\/(?:sdk|x-cli))\b[\s@="`]+v?(\d+\.\d+\.\d+)\b/g)) {
+      assert.ok(sdkVersions[name].includes(version), `${where}: ${name} ${version}, pinned to ${[...new Set(sdkVersions[name])].join(' or ')}`)
+    }
+  }
+
   const agentsDir = join(root, 'agents')
   const agents = existsSync(agentsDir) ? readdirSync(agentsDir).filter(f => f.endsWith('.md')) : []
   for (const file of agents) {

@@ -1,11 +1,11 @@
 # Rust trigger notes
 
 Read this only when you're actually authoring a Rust trigger, and after `trigger-patterns.rs`
-beside it — that file is six handlers that fired on a real instance (and build unchanged against
-the crate `aspen init` scaffolds), and copying the nearest one is faster than learning the rules
-first. This file is the rules those patterns obey, for when none of them is your case. The
-`aspen_crm` crate's own docs.rs coverage is thin; every fact below was hit in a live session, not
-inferred.
+beside it. That file is six handlers that build unchanged against the crate `aspen init`
+scaffolds, and copying the nearest one is faster than learning the rules first. This file is the
+rules those patterns obey, for when none of them is your case. The `aspen_crm` crate's own
+docs.rs coverage is thin. Facts below are checked against the SDK and 26.4.1 platform source
+unless marked *observed on a live instance*.
 
 ## One crate, at `rust/`, and the CLI names the codefile
 
@@ -34,12 +34,13 @@ The scaffold already did the two things that used to cost hours; keep them:
    ```
    It names wit-bindgen, so it reads as a dependency problem. It is not — it is the toolchain's
    `wasm-component-ld` disagreeing with what `aspen-crm`'s macro emits. Check the pin first.
+   *(Observed on a live instance.)*
 2. **`rust/Cargo.lock` is committed, and `aspen compile --rust` builds `--locked`.** Adding a
    dependency (the patterns use `jiff = "0.2"`) means updating the lock once:
    `cd rust && cargo update -p <crate>` (or `cargo generate-lockfile`), then commit it.
-3. **`aspen-crm` is pinned exactly** (`"=0.1.0"`) and must match the release the instance serves,
-   together with the two TypeScript packages. Raise all three together when the instance moves —
-   never just one. `aspen doctor` checks it (`rust.sdk-pin`).
+3. **`aspen-crm` is pinned exactly** (`"=0.1.0"`), the release this CLI ships. `aspen doctor`
+   (`rust.sdk-pin`) flags a range or a different release. On a new CLI, raise it and the two
+   TypeScript packages together — never just one.
 
 Per machine: rustup, and `rustup target add wasm32-wasip2` (doctor: `toolchain.wasm-target`).
 
@@ -53,6 +54,31 @@ logic in plain functions so it can be tested without a record context.
 errors, and the Record, Query, Log and Runtime Context services are documented in the Aspen SDK
 section — ask `aspen-docs` ("record triggers", "record service", "query service"). What follows is
 only what those pages do not say.
+
+## Which objects can have a trigger
+
+Every custom (`_c`) object. A platform (`_p`) object only if it is on the platform's trigger
+allow-list; a trigger on any other `_p` object (e.g. `user_p`, `note_p`) compiles, deploys and
+never fires. The allow-list: `account_p`, `account_address_p`, `activity_p`, `bundle_item_p`,
+`case_p`, `contact_p`, `contact_address_p`, `contact_channel_p`, `contact_role_p`, `email_p`,
+`fiscal_period_p`, `lead_p`, `meeting_p`, `opportunity_p`, `product_p`, `product_category_p`,
+`product_category_item_p`, `task_p`, `tax_rate_p`, `team_p`, `team_role_p`.
+
+`entrypoints!` checks each `events` string at compile time (an unknown one fails the build with
+`unknown variant`), and every entry in `aspen.server.json` needs its `impl`. The `object` string
+is not checked against metadata.
+
+## Never write to the records the trigger is running on
+
+While a trigger runs on a set of record ids, the platform refuses any nested insert, update or
+delete that touches one of those ids: "Cannot initiate new trigger with record ids …". The
+trigger's `execute_update` returns `Err`, and with `?` the user's whole save fails. A
+write-only-on-change guard does not help, since the first write is already refused.
+
+- A value on the record itself: set it in `before_insert`/`before_update` with `record.set`. It
+  lands in the same write.
+- Follow-on work that must wait for the commit (a task, a child row): do it in the after-trigger,
+  and write only other records.
 
 ## When the notes don't cover it: read the crate source, not docs.rs
 
@@ -79,22 +105,24 @@ stress, both of which produced a trigger that "did nothing":
   trigger" below).
 - A polyid needs its discriminator set alongside it, with the right variant — see "Field types"
   below. `task_p.owner_p` is `PolyidParent`, not `IdLookup`, and `owneron_p` is required even
-  though `owner_p` only ever points at `user_p`.
+  though `owner_p` only ever points at `user_p` *(observed on a live instance)*.
 
 ## Reading fields in a trigger
 
-`AfterUpdateContext`'s batch holds only the fields that *changed* in this update — checking
-`record.get("field_c")` for a value already means the transition happened; there's no need to
-compare old vs. new yourself. But that also means untouched fields aren't in the batch at all —
+An update batch (`BeforeUpdateContext`, `AfterUpdateContext`) holds the fields the caller
+*sent*, not the fields that changed. A form or integration that resends a value puts it in the
+batch unchanged, so `record.get("field_c")` returning a value does **not** mean a transition
+happened. When the transition matters, read the stored row in `before_update` (it is still the
+pre-update one there) and compare. Fields the caller did not send are not in the batch at all —
 read anything else about the record (its name, an unrelated field) with a separate query.
 
-**`id_p` is the one exception.** It never "changes", but `record.get("id_p")` still returns
+**`id_p` is always there.** `record.get("id_p")` returns
 `FieldState::Value(RecordFieldValue::Id(id))` on every record in the batch. Confirmed from the
 platform's `record-trigger` WIT interface: `before-delete-record`/`after-delete-record` get a
 dedicated `id()` accessor, but the insert/update record types
 (`immutable-object-record`/`mutable-object-record`) do not — `get("id_p")` is the *only* way those
 triggers can identify which record they're looking at, so the platform has to populate it
-regardless of the changed-only rule. If a match on it ever falls through to your catch-all arm,
+whatever the caller sent. If a match on it ever falls through to your catch-all arm,
 look elsewhere first (field name typo, wrong variant) — it almost never means the id is missing.
 
 Use the id to read anything else about the record with a separate query — AQL requires `LIMIT`
@@ -123,8 +151,9 @@ match row.get(1) {
 }
 ```
 
-This is what actually fixed a real trigger's queries: matching only `RecordFieldValue::Id` left
-every row unmatched, falling through to the catch-all silently, on every run. It is not necessarily
+This is what actually fixed a real trigger's queries *(observed on a live instance)*: matching only
+`RecordFieldValue::Id` left every row unmatched, falling through to the catch-all silently, on
+every run. It is not necessarily
 the same variant you'd use to *write* that field (see "Field types" below) — reading and writing a
 lookup/polyid field are different code paths with independently-confirmed shapes.
 
@@ -148,7 +177,7 @@ The last row is a polyid's **discriminator** field (`owneron_p` for `owner_p`, `
 `String`) and only fails at `execute_insert`, inside `result.failures()` — invisible unless you
 check that explicitly (see "Debugging a trigger" below).
 
-**Confirmed the hard way, not from the docs:** `task_p.owner_p` and `task_p.what_p` are both
+**Confirmed the hard way, not from the docs** *(observed on a live instance)*: `task_p.owner_p` and `task_p.what_p` are both
 `polyid`/`parent` fields — `owner_p` restricted to one object (`user_p`) via `allowed-objects`,
 `what_p` open to several. A trigger that wrote both with `RecordFieldValue::IdLookup` — reasoning
 "it only points at one kind of object, so it's basically a lookup" — compiled clean, checked in
@@ -156,7 +185,17 @@ clean, and inserted nothing: no task record, no error surfaced where the human w
 trigger that appeared to do nothing. Restricting a polyid to one `allowed-objects` entry doesn't
 turn it into an `id`/`lookup` field; it's still `type: polyid`, and still needs `PolyidLookup` or
 `PolyidParent` — never `IdLookup`, which is only correct for a field whose own `type` is `id`, e.g.
-`account_p.owner_p`.
+`account_p.owner_p` (an `id`/`lookup` to `team_p` — a team, not a user).
+
+Owner fields on 26.4.1 platform objects, for the shape to write:
+
+| Object | `owner_p` | Write |
+|---|---|---|
+| `account_p`, `contact_p` | `id`/`lookup` to `team_p` | `IdLookup` of a team id, no `*on_p` |
+| `case_p`, `lead_p`, `opportunity_p` | `polyid`/`lookup`, allowed `user_p` | `PolyidLookup` + `owneron_p` |
+| `task_p`, `email_p`, `meeting_p`, `activity_p` | `polyid`/`parent`, allowed `user_p` | `PolyidParent` + `owneron_p` |
+
+`contact_role_p` points at its account or opportunity through `what_p`/`whaton_p`.
 
 **Every polyid's discriminator field has to be set, not just an "open" one.** `task_p.owner_p` is
 restricted to a single `allowed-objects` entry (`user_p`) — that did *not* exempt it from needing
@@ -197,23 +236,25 @@ but found non-zero 'day' units"*. A `Timestamp` is a point on a fixed timeline w
 attached to it, so a calendar-unit `Span` (`.days()`, `.months()`, …) is a well-typed operation on
 it that only jiff's own runtime check rejects — the type system doesn't catch it, so this one only
 shows up once the trigger actually fires, as an `after trigger error` on the save, not as a compile
-error. Convert to a `Date` first (`.in_tz(<zone>)`, a `&str` — not a `TimeZone` value — returning
+error *(observed on a live instance)*. Convert to a `Date` first (`.in_tz(<zone>)`, a `&str` — not a `TimeZone` value — returning
 `Result<Zoned, Error>`, then `.date()`), and add the calendar span to *that*.
 
 ## Smaller confirmed facts
 
-Each of these cost a live debugging round; none is in the crate docs.
+None of these is in the crate docs.
 
 - **`after_delete` exposes only `id()`, and the row is already gone** — nothing else about the
   record can be read from inside it. If the handler needs the record's fields, use `before_delete`
-  and query the row there.
-- **Picklist items are parent-scoped.** An item defined under one object is rejected when written
-  on another — `decision_maker`/`influencer` exist on opportunity only, `champion`/`detractor` on
-  account only. Checkin doesn't catch it; the end user's save does, as an error on *their* write
-  when the trigger fires. Check the item's parent in its picklist JSON before writing it.
-- **A trigger whose write lands back on its own object needs a write-only-on-change guard**, or
-  it re-fires itself (an `org_health_c` handler that writes `org_c` is the shape to watch for).
-  Compare before writing.
+  and query the row there. `before_delete` records have `id()` and `add_record_error`, no `get`.
+- **Picklist items are parent-scoped.** An item allowed for one parent object is rejected when
+  written for another. On `contact_role_p.role_p`, `decision_maker_p`/`influencer_p` are for
+  opportunity roles only, `champion_p` for account roles only, `detractor_p` for both. Checkin
+  doesn't catch it; the end user's save does, as an error on *their* write when the trigger fires
+  *(observed on a live instance)*. Check the item's `parent-objects` in its picklist JSON before
+  writing it.
+- **Writes to the triggering records are refused** — see "Never write to the records the trigger
+  is running on" above. A trigger whose write lands on *other* records of its own object needs a
+  write-only-on-change guard, or it re-fires itself on them. Compare before writing.
 - `runtime_context().current_user_id()` is the acting user — for an owner field, or to skip
   system-initiated writes.
 - Names and constructors that are easy to get wrong: `RecordFieldValue::Datetime` (lowercase
@@ -238,18 +279,21 @@ turned out to be the actual answer once, after everything downstream of it looke
 2. **Confirm it deployed, not just compiled.** `checkin-prep` succeeding doesn't mean
    `checkin-deploy` ran. A checkin stuck partway through looks identical, from the outside, to a
    trigger that's live and has a logic bug.
-3. **Confirm the registration matches exactly.** `object` and `events` in `aspen.server.json` are
-   plain strings the platform doesn't validate against object/picklist metadata at compile time —
-   a typo'd object name or event compiles clean and simply never runs.
+3. **Confirm the registration matches exactly.** `events` are checked at compile time, but
+   `object` is a plain string nothing validates against metadata — a typo'd object name compiles
+   clean and simply never runs. So does a trigger on a `_p` object outside the allow-list (see
+   "Which objects can have a trigger" above).
 4. **Picklist item names are exact strings, not a compiler-checked enum.** `"cancelled_c"` in Rust
-   has to match the picklist item's `name` in its metadata JSON byte-for-byte; nothing catches a
-   mismatch except comparing the two files.
+   has to match the picklist item's `name` in its metadata JSON byte-for-byte. Nothing checks a
+   value the trigger *writes* until the save; in a query's `WHERE`, AQL rejects a non-item at query
+   time.
 5. **A `SELECT` without `LIMIT` fails at query time.** If a trigger reaches a query and stops, this
    is the first thing to check — see "Reading fields in a trigger" above.
 6. **If the trigger inserts or updates a record, capture the `Result` and check `.failures()` —
    `?` alone silently drops row-level rejections.** `execute_insert`/`execute_update` return
    `Result<BatchProcessed, BatchFailure>`: the `Err` side is a whole-batch failure (a malformed
-   request) and is all a bare `execute_insert(request)?;` — return value unused — can ever surface.
+   request, more than 500 records, a write to the triggering records) and is all a bare
+   `execute_insert(request)?;` — return value unused — can ever surface.
    A single row that fails validation (wrong `RecordFieldValue` variant for the field's own
    `type`/`subtype`, see the table above; a missing required field; anything else the platform
    rejects) comes back inside `Ok(BatchProcessed)`, in `.failures()` — `?` never sees it, and
@@ -276,7 +320,8 @@ turned out to be the actual answer once, after everything downstream of it looke
    anything.
 7. **There is no confirmed way to read `aspen_crm::warn!`/`info!` output yourself.** The Log
    Service forwards them to platform logging, and the platform decides which levels are kept, but
-   nothing reachable from the CLI or the devtools API shows them (both were tried). What
+   nothing reachable from the CLI or the devtools API shows them (both were tried, *observed on a
+   live instance*). What
    *is* confirmed visible: a **hard error** — an `Err` returned from the entrypoint, e.g. via
    `error::bail!` — surfaces at the point of the save that fired the trigger, in the UI, as an
    error on that save. A `warn!`/`info!` call inside a `_ => continue` catch-all is invisible; the

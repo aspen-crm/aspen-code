@@ -24,10 +24,9 @@ import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { credentialsPath, instanceDir, loggedInInstance } from './session-start.mjs'
+import { credentialsPath, instanceDir, loggedInInstance, sameInstance as same } from './session-start.mjs'
 
 const real = (p) => { try { return realpathSync(p) } catch { return resolve(p) } }
-const same = (a, b) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase()
 const HELP = new Set(['--help', '-h', 'help', '--version', '-V'])
 // Flags whose next word is their value, not a subcommand.
 const VALUED = new Set(['--dir', '--agent', '--import-mode', '--config-vars-file', '--file', '--platform-dir',

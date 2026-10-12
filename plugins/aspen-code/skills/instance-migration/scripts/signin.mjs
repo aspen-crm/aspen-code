@@ -1,16 +1,17 @@
 // Sign in to an Aspen instance the way `aspen login` does: the browser, PKCE, and a redirect to
 // 127.0.0.1. The token stays in this process's memory and is never written anywhere. close()
-// revokes the refresh token; the last access token cannot be revoked and expires within the hour.
+// revokes the refresh token, which also revokes the access token issued with it.
 //
 // The instance's API names its OAuth resource and sign-in server (RFC 9728), and the server names
-// its endpoints (RFC 8414). On Aspen the resource is the pod's origin, not the instance URL, and
-// the authorize endpoint sits on another host than the token endpoint, so nothing is built by hand.
+// its endpoints (RFC 8414). On Aspen the resource is the instance host's origin, without the
+// instance URL's path, and the authorize endpoint sits on the domain host while token and revoke
+// sit on the instance host, so nothing is built by hand.
 
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 
-export const CLIENT_ID = 'aspen-cli' // the CLI's public client; the only one registered
+export const CLIENT_ID = 'aspen-cli' // the CLI's public client, registered for a 127.0.0.1 callback on any port
 const TIMEOUT_MS = 5 * 60 * 1000
 const STRAY_CAP = 20 // unrelated local requests tolerated while waiting for the callback
 const EARLY_MS = 60 * 1000 // refresh this long before the access token expires

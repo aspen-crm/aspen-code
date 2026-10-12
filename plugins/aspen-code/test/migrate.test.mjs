@@ -3,14 +3,16 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
 import { signIn } from '../skills/instance-migration/scripts/signin.mjs'
 
-const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'instance-migration', 'scripts', 'migrate.mjs')
+const plugin = join(dirname(fileURLToPath(import.meta.url)), '..')
+const script = join(plugin, 'skills', 'instance-migration', 'scripts', 'migrate.mjs')
+const PINNED_API = JSON.parse(readFileSync(join(plugin, 'xplatform.json'), 'utf8')).api
 const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 // ---- a fake Aspen instance: sign-in, describe, query and record writes, with the rules the real
@@ -26,7 +28,7 @@ const date = (name) => ({ name, type: 'date', subtype: 'date' })
 const datetime = (name) => ({ name, type: 'datetime', subtype: 'datetime' })
 const SYSTEM = [{ name: 'id_p', type: 'id', subtype: 'id' }, datetime('ct_p'), datetime('mt_p'), lookup('cb_p', 'user_p'), lookup('mb_p', 'user_p')]
 
-async function mockInstance ({ base, objects, picklists, records, failCreate = () => false, expireAfter = Infinity }) {
+async function mockInstance ({ base, objects, picklists, records, failCreate = () => false, warnCreate = () => false, expireAfter = Infinity, api = PINNED_API }) {
   const calls = []
   const issued = [] // every code and token handed out, to prove none leaks
   const codes = new Map()
@@ -83,8 +85,8 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
       return send(200, {})
     }
 
-    if (!path.startsWith(base + '/api/v24.3/')) return send(404, { failures: [{ error_type: 'NOT_FOUND' }] })
-    const route = path.slice((base + '/api/v24.3').length)
+    if (!path.startsWith(`${base}/api/v${api}/`)) return send(404, { failures: [{ error_type: 'NOT_FOUND' }] })
+    const route = path.slice(`${base}/api/v${api}`.length)
     calls.push({ method: req.method, route, body })
     const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
     const uses = access.get(token)
@@ -171,9 +173,12 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
         if (existing) { Object.assign(existing, row); return { status: 'SUCCESS', id: existing.id_p } }
         const rec = { ...row, id_p: randomUUID(), ct_p: new Date(clock += 1000).toISOString() };
         (records[obj] ??= []).push(rec)
+        // A row applied with a warning: written, and reported as WARNING rather than SUCCESS.
+        if (warnCreate(obj)) return { status: 'WARNING', id: rec.id_p, warnings: [{ error_type: 'INVALID_DATA', detail: 'applied with a warning', display_detail: '' }] }
         return { status: 'SUCCESS', id: rec.id_p }
       })
-      return send(200, { status: data.every(d => d.status === 'SUCCESS') ? 'SUCCESS' : 'FAILURE', data })
+      const status = data.some(d => d.status === 'FAILURE') ? 'FAILURE' : data.some(d => d.status === 'WARNING') ? 'WARNING' : 'SUCCESS'
+      return send(200, { status, data })
     }
     send(404, { failures: [{ error_type: 'NOT_FOUND' }] })
   })
@@ -187,13 +192,13 @@ const SOURCE_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
   company_c: [text('name_c', { required: true }), picklist('sector_c'), lookup('parent_c', 'company_c'), lookup('owner_p', 'user_p'), text('note_c', { long: true }), number('score_c'), objectType('otype_c')],
   person_c: [text('first_c'), text('last_c'), text('email_c'), lookup('company_c', 'company_c'), date('born_c'), datetime('met_c')],
-  project_c: [text('name_c'), picklist('stage_c'), lookup('company_c', 'company_c'), number('budget_c'), text('extra_c')]
+  project_c: [text('name_c'), picklist('stage_c'), lookup('company_c', 'company_c'), number('budget_c'), text('extra_c'), text('code_c')]
 }
 const TARGET_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
   account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p')],
   contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c')],
-  project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true })]
+  project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true }), { ...text('code_c'), 'read-only': true }]
 }
 const LONG_NOTE = 'n'.repeat(300)
 const sourceRecords = () => ({
@@ -247,10 +252,10 @@ function browser (home) {
   return bin
 }
 
-async function setup (t, { target = targetRecords(), failCreate, expireAfter } = {}) {
+async function setup (t, { target = targetRecords(), failCreate, warnCreate, expireAfter, api, migrate = script } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
-  const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords() })
-  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, expireAfter })
+  const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords(), api })
+  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
   t.after(() => { src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
@@ -259,7 +264,7 @@ async function setup (t, { target = targetRecords(), failCreate, expireAfter } =
   const ws = join(dir, 'data', 'migrations', 'legacy')
   // Every run is checked: no code or token in anything the script prints.
   const run = (...args) => new Promise((resolve) => {
-    const p = spawn(process.execPath, [script, ...args], { cwd: dir, env: { ...process.env, HOME: home, USERPROFILE: home, PATH } })
+    const p = spawn(process.execPath, [migrate, ...args], { cwd: dir, env: { ...process.env, HOME: home, USERPROFILE: home, PATH } })
     let stdout = ''; let stderr = ''
     p.stdout.on('data', d => { stdout += d }); p.stderr.on('data', d => { stderr += d })
     p.on('close', (status) => {
@@ -357,6 +362,7 @@ test('draft matches by name and type and marks every gap as a todo', async t => 
   assert.match(f.stage_c.todo, /x_c/)
   assert.match(f.extra_c.todo, /no field extra_c/)
   assert.match(f.owner_c.todo, /required/)
+  assert.match(f.code_c.todo, /read-only/)
   assert.equal(project.key, 'name_c')
   assert.ok(!project.fields.some(e => ['id_p', 'ct_p', 'cb_p'].includes(e.from)), 'system fields left out')
   // Running draft again adds only new objects.
@@ -533,6 +539,41 @@ test('--limit loads a pilot, holds children whose parent is not loaded, and the 
   assert.equal(s.tgt.records.account_p.length, 3)
   assert.equal(s.tgt.records.contact_p.length, 3)
   assert.equal(byName(s.tgt, 'account_p', 'name_p', 'Beta').parent_account_p, byName(s.tgt, 'account_p', 'name_p', 'Acme').id_p)
+})
+
+test('a row the target applies with a WARNING counts as loaded, and a re-run does not insert it again', async t => {
+  const s = await setup(t, { warnCreate: (o) => o === 'account_p' })
+  await s.ready()
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.equal(lines(join(s.ws, 'idmap', 'company_c.jsonl')).length, 3)
+  assert.equal(lines(join(s.ws, 'errors', 'company_c.jsonl')).length, 0)
+  assert.equal(byName(s.tgt, 'contact_p', 'email_p', 'ada@x.com').account_p, byName(s.tgt, 'account_p', 'name_p', 'Acme').id_p)
+  assert.equal((await s.run('load', s.ws, '--run')).status, 0)
+  assert.equal(s.tgt.records.account_p.length, 3)
+})
+
+// ---- the App API version
+
+// migrate.mjs and signin.mjs beside a copy of the pin, laid out as in the plugin.
+function pinnedCopy (t, pin) {
+  const root = mkdtempSync(join(tmpdir(), 'aspen pin '))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const dir = join(root, 'skills', 'instance-migration', 'scripts')
+  mkdirSync(dir, { recursive: true })
+  for (const f of ['migrate.mjs', 'signin.mjs']) copyFileSync(join(dirname(script), f), join(dir, f))
+  if (pin) writeFileSync(join(root, 'xplatform.json'), JSON.stringify(pin))
+  return join(dir, 'migrate.mjs')
+}
+
+test('the App API version comes from the pin, and is 24.3 when the pin cannot be read', async t => {
+  for (const [pin, api] of [[{ api: '25.1' }, '25.1'], [null, '24.3'], [{ api: 'latest' }, '24.3']]) {
+    const s = await setup(t, { api, migrate: pinnedCopy(t, pin) })
+    assert.equal((await s.init()).status, 0)
+    const r = await s.run('describe', s.ws)
+    assert.equal(r.status, 0, `pin ${JSON.stringify(pin)}: ${r.stderr}`)
+    assert.ok(s.tgt.calls.some(c => c.route === '/describe/object_p'), `pin ${JSON.stringify(pin)}: describe never reached /api/v${api}`)
+  }
 })
 
 // ---- verify

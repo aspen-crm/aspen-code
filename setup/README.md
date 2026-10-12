@@ -145,8 +145,8 @@ them the change the installer printed. New terminals then find `aspen`.
 > A browser opens; sign in to the instance and approve. Come back when it says "Login succeeded".
 
 **Check:** the `instance` field of `~/.config/aspen/credentials.json` (Windows:
-`%APPDATA%\aspen\credentials.json`) names that instance. Read only that field; the file never
-holds the secret, which is in the OS keychain.
+`%APPDATA%\aspen\credentials.json`) names that instance. Read only that field; the secret is in
+the OS keychain, or in this file only if the user chose file storage.
 
 ### 6. Load the plugin, then the first prompt
 

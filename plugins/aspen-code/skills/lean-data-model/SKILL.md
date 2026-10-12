@@ -23,7 +23,7 @@ placed, well named, with a layout and a list view and a tab — on an instance t
 Ask all six, out loud, before authoring. They take a minute and they are the whole skill.
 
 **1. Which platform object already holds this?**
-There are ~48. Look, do not remember: `ls metadata/platform/object_p/ metadata/active/object_p/`
+There are 37 at 26.4.1. Look, do not remember: `ls metadata/platform/object_p/ metadata/active/object_p/`
 (the second lists what this instance has already added). The business word and the
 platform word are rarely the same — `platform-objects.md` beside this file maps the ones that
 catch people out. Deal is `opportunity_p`. Company is `account_p`. Ticket is `case_p`.

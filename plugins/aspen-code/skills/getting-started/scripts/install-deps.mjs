@@ -23,13 +23,18 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
-import { delimiter, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const WIN = platform() === 'win32'
 const PUBLIC_NPM = 'https://registry.npmjs.org/'
-// What @aspen-crm/x-cli 0.1.0 declares in `engines`. Read from the installed package when it is
-// there; this is the fallback for a directory whose packages are not installed yet.
-const NODE_RANGE_FALLBACK = { node: '^24.11.1', npm: '^11.6.2' }
+// What @aspen-crm/x-cli declares in `engines` at the pinned x-platform release (xplatform.json).
+// Read from the installed package when it is there; this is the fallback for a directory whose
+// packages are not installed yet.
+const PINNED_UI = (() => {
+  try { return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'xplatform.json'), 'utf8')).ui } catch { return {} }
+})()
+const NODE_RANGE_FALLBACK = { node: PINNED_UI.node ?? '^24.11.1', npm: PINNED_UI.npm ?? '^11.6.2' }
 
 const args = process.argv.slice(2)
 const flag = (f) => args.includes(f)

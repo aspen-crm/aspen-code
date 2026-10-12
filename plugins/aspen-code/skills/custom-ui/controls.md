@@ -9,9 +9,11 @@ reaches it, so the opened control is the operating system's, not Aspen's. A hook
 Build them from the anatomy below. It is the platform's own design system, part by part: the
 element and role each part is, **the exact `--ap-comp-*` names that style it** (every state the
 family publishes; a family that publishes no token for something says so and names the one to
-use), its icon, and its keyboard contract. Use these names as written — on an SDK with a token
-snapshot their values are in `typescript/node_modules/@aspen-crm/sdk/dist/tokens/comp/<family>.d.ts`,
-and the build rejects a name the snapshot lacks.
+use), its icon, and its keyboard contract. Use these names as written. On SDK 0.2.0, which ships a
+token snapshot, their values are in
+`typescript/node_modules/@aspen-crm/sdk/dist/tokens/comp/<family>.d.ts` and x-cli 0.2.0 rejects a
+name the snapshot lacks. On 0.1.0 nothing checks them, so keep the light value as the `var()`
+fallback.
 
 Icons come from [aspen-icons.ts](aspen-icons.ts) beside this file — copy it into
 `typescript/src/`. **Never a text glyph or emoji** (`▾ ▼ ‹ › × ✕ ✓ 📅`); a hook denies those too.
