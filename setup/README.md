@@ -59,16 +59,15 @@ network or proxy trouble. Say so and stop.
 
 ### 2. Remove the old plugin, if it is installed
 
-`aspen-code@aspen` (from `aspen-crm/aspen-tools`, which no longer offers it) defines skills with
-the same names. With both installed, the model gets two sets of Aspen instructions.
+`aspen-code@aspen`, an older copy of this plugin, defines skills with the same names. With both installed, the model gets two sets of Aspen instructions.
 
 | Host | Check | Remove (ask first) |
 |---|---|---|
 | Claude Code | `claude plugin list` shows `aspen-code@aspen` | `claude plugin uninstall aspen-code@aspen` |
 | Codex | `codex plugin list` shows `aspen-code@aspen` | `codex plugin remove aspen-code@aspen` |
 
-Remove only `aspen-code@aspen`. Leave `aspencrm-ai@aspen` — the records plugin, a different
-lane — and the `aspen` marketplace alone: removing a marketplace uninstalls everything from it.
+Remove only `aspen-code@aspen`. Leave the `aspen` marketplace and its other plugins alone:
+removing a marketplace uninstalls everything from it.
 
 ### 3. Install the plugin
 
@@ -79,7 +78,7 @@ lane — and the `aspen` marketplace alone: removing a marketplace uninstalls ev
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.5 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.6 or
 later, enabled.
 
 Already installed? Update it. Each release carries a new version number, which is what an update
@@ -172,9 +171,10 @@ The plugin takes it from there:
   showing the plan and asking first.
 - **Checks everything** with `aspen doctor`.
 
-Then **open a new session inside that instance folder** (`<domain>_<instance>`) and describe the
-change you want, e.g. *"Add a renewal date and an auto-renew flag to accounts, and show them on the
-account layout."*
+- **Offers to switch the session** into the new instance folder (`<domain>_<instance>`).
+
+Say yes, or open a new session inside that folder. Then describe the change you want, e.g. *"Add
+a renewal date and an auto-renew flag to accounts, and show them on the account layout."*
 
 ---
 

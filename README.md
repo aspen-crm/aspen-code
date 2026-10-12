@@ -3,10 +3,7 @@
 The Claude Code and Codex plugin for building on an Aspen instance with the **aspenup** CLI
 (`aspen login` / `init` / `compile` / `doctor` / `move`).
 
-This repository is the authoring lane: the model, the code, and deploying them. Working a
-live instance's records instead — view, search, report, create, update — is the separate
-`aspencrm-ai` plugin in [aspen-tools](https://github.com/aspen-crm/aspen-tools). Neither
-needs the other.
+It covers authoring: the model, the code, and deploying them.
 
 Still **0.0.x**: in use, but the version says what it says.
 
@@ -83,7 +80,7 @@ controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 
-Not in 0.0.5: the remaining guard hooks.
+Not in 0.0.6: the remaining guard hooks.
 
 ## Install
 
@@ -93,8 +90,8 @@ Not in 0.0.5: the remaining guard hooks.
 | Install | `/plugin install aspen-code@aspen-code` | `codex plugin add aspen-code@aspen-code` |
 | Update | `/plugin marketplace update aspen-code` | `codex plugin marketplace upgrade aspen-code` |
 
-**Already have `aspen-code@aspen`?** That plugin shipped from aspen-tools and is no longer
-offered there. Uninstall it first or you will have two sets of Aspen skills:
+**Already have `aspen-code@aspen`?** That is an older copy of this plugin. Uninstall it first
+or you will have two sets of Aspen skills:
 `/plugin uninstall aspen-code@aspen`, or `codex plugin remove aspen-code@aspen`.
 
 No git? Claude Code can add `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json`

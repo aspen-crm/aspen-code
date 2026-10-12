@@ -5,7 +5,7 @@ description: Use when the aspen CLI is not installed or out of date, not signed 
 
 # Getting started
 
-Five steps, each ending in a check you run. Do them in order and stop at the first one that is
+Six steps, each ending in a check you run. Do them in order and stop at the first one that is
 already done — the session-start note usually says which.
 
 ## 1. Install or update the CLI — with consent
@@ -99,13 +99,13 @@ What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matte
 
 - It needs the login, and it creates the directory, named after the instance, **under** the one
   you give it. **Ask where it should go** (e.g. `~/Aspen`), then `aspen init --dir ~/Aspen`, which
-  creates `~/Aspen/<domain>_<instance>`.
+  creates `~/Aspen/<domain>_<instance>` — `<dir>` in the steps below.
 - It refuses only when that instance-named folder already holds files and no
   `.aspen/config.toml`; the parent may hold anything. It never overwrites a file you authored. Run
   again from **inside** an instance directory, it completes a fresh clone or refreshes the fetched
   `platform/` and `active/` layers.
-- Afterwards the session should work **in** that directory: tell the user to reopen the host there
-  (or `cd` for your commands, and say you did). Suggest `git init` and a first commit.
+- Don't move the session there yet. Steps 4 and 5 take `<dir>` as an argument, and step 6 asks
+  the user before switching.
 
 **Check:** `.aspen/config.toml` names the instance you signed in to.
 
@@ -114,12 +114,13 @@ What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matte
 `aspen init` installs nothing. Building needs the Rust toolchain the crate pins (with
 `wasm32-wasip2`) and its crates, and a Node that satisfies the UI tooling (`^24.11.1`, npm
 `^11.6.2`) plus `typescript/`'s packages. The bundled script does all of it. Resolve it from the
-absolute directory holding this `SKILL.md`, and run it from the instance directory:
+absolute directory holding this `SKILL.md`, and pass it the instance directory (it defaults to the
+one the working directory sits in):
 
 ```sh
-node "<this skill's dir>/scripts/install-deps.mjs"             # the plan; changes nothing
-node "<this skill's dir>/scripts/install-deps.mjs" --run       # install the project's dependencies
-node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rustup / Node for this user
+node "<this skill's dir>/scripts/install-deps.mjs" <dir>             # the plan; changes nothing
+node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run       # install the project's dependencies
+node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run --machine   # also rustup / Node for this user
 ```
 
 1. **Show the user the plan** and ask to install. It has two kinds of step, and they need
@@ -146,7 +147,7 @@ node "<this skill's dir>/scripts/install-deps.mjs" --run --machine   # also rust
 ## 5. Check the directory — `aspen doctor`
 
 ```sh
-aspen doctor            # JSON under an agent; one {id, section, status, message, fix?} per finding
+aspen doctor --dir <dir>   # JSON under an agent; one {id, section, status, message, fix?} per finding
 ```
 
 Exit 1 means at least one `problem`. After step 4 every `toolchain.*`, `rust.*` and
@@ -160,6 +161,19 @@ Not fine, stop and tell the user:
   `diagnose` → version skew.
 - `configuration.record-matches-login` — signed in to a different instance than this directory's.
   Back to step 2 with this directory's URL.
+
+## 6. Switch to the new directory — ask
+
+Only when step 3 created a new instance directory. Every `aspen` command runs from inside it, so
+ask: *Setup is done. Switch this session to `<dir>`?*
+
+- **Yes:** `cd <dir>` and say you did. If the check fails (the host resets the directory between
+  commands), tell the user to reopen the host there (VS Code: **File → Open Folder**).
+- **No:** leave the session where it is. Tell them to reopen the host in `<dir>` before building.
+
+Either way, suggest `git init` and a first commit.
+
+**Check:** after a yes, `pwd` in a separate command prints `<dir>`.
 
 Then hand off to `using-aspen`.
 
