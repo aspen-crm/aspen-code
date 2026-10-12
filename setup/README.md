@@ -172,9 +172,10 @@ The plugin takes it from there:
   showing the plan and asking first.
 - **Checks everything** with `aspen doctor`.
 
-Then **open a new session inside that instance folder** (`<domain>_<instance>`) and describe the
-change you want, e.g. *"Add a renewal date and an auto-renew flag to accounts, and show them on the
-account layout."*
+- **Offers to switch the session** into the new instance folder (`<domain>_<instance>`).
+
+Say yes, or open a new session inside that folder. Then describe the change you want, e.g. *"Add
+a renewal date and an auto-renew flag to accounts, and show them on the account layout."*
 
 ---
 
