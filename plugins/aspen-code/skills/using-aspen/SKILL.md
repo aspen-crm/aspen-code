@@ -67,6 +67,7 @@ what it actually does) and the compiler first, then real components in `metadata
 | 5 | Compile, deploy through the check-in chain, prove it with a record round-trip | `build-and-deploy` |
 | — | A compile, check-in, or the instance behaves unexpectedly | `diagnose` |
 | — | Move records (and the objects and fields they need) from another Aspen instance into this one | `instance-migration` |
+| — | Move records from a **Salesforce** org into this instance: map its objects onto this data model, report the gaps and ETLs, extract and load | `salesforce-migration` |
 
 Steps 1 and 2 happen **before the first file**. Nothing on this platform deletes, so they are only
 cheap now. Skip them only when the tier is already settled: fixing a field you authored last turn,
