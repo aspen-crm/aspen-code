@@ -34,55 +34,55 @@ platform's own set moves between releases.
 
 ## The catalogue
 
-37 objects. **New `_c` fields** says whether an overlay may add fields: "locked" objects refuse
-any overlay; `activity_p` takes fields but no custom object types.
+37 objects.
 
-| Object | Label | Fields | New `_c` fields |
-|---|---|---|---|
-| `account_address_p` | Account Address | 10 | yes |
-| `account_p` | Account | 9 | yes |
-| `activity_p` | Activity | 18 | yes |
-| `attachment_p` | Attachment | 10 | yes |
-| `bundle_item_p` | Bundle Item | 3 | yes |
-| `case_p` | Case | 15 | yes |
-| `contact_address_p` | Contact Address | 9 | yes |
-| `contact_channel_p` | Contact Channels | 12 | no (locked) |
-| `contact_merge_p` | Contact Merge | 7 | no (locked) |
-| `contact_owner_p` | Contact Owners | 4 | yes |
-| `contact_p` | Contact | 22 | yes |
-| `contact_rel_p` | Contact Relationship | 13 | no (locked) |
-| `contact_role_p` | Contact Role | 7 | yes |
-| `currency_p` | Currency | 5 | yes |
-| `email_p` | Email | 19 | no |
-| `exchange_rate_p` | Exchange Rate | 5 | yes |
-| `file_p` | File | 11 | no (locked) |
-| `fiscal_period_p` | Fiscal Period | 5 | yes |
-| `join_request_p` | Join Request | 8 | no (locked) |
-| `lead_p` | Lead | 13 | yes |
-| `meeting_p` | Meeting | 21 | no |
-| `miner_check_p` | Miner Check | 5 | no (locked) |
-| `miner_delete_p` | Miner Delete | 3 | no (locked) |
-| `miner_sync_failure_p` | Miner Sync Failure | 8 | no (locked) |
-| `miner_sync_job_p` | Miner Sync Job | 7 | no (locked) |
-| `miner_sync_state_p` | Miner Sync State | 10 | no (locked) |
-| `note_p` | Note | 6 | yes |
-| `opportunity_p` | Opportunity | 14 | yes |
-| `product_category_item_p` | Product Category Item | 3 | yes |
-| `product_category_p` | Product Category | 3 | yes |
-| `product_p` | Product | 8 | yes |
-| `security_policy_p` | Security Policy | 3 | no (locked) |
-| `task_p` | Task | 17 | yes |
-| `tax_rate_p` | Tax Rate | 4 | yes |
-| `team_p` | Team | 13 | yes |
-| `team_role_p` | Team Role | 7 | yes |
-| `user_p` | User | 13 | no (locked) |
+| Object | Label | Fields |
+|---|---|---|
+| `account_address_p` | Account Address | 10 |
+| `account_p` | Account | 9 |
+| `activity_p` | Activity | 18 |
+| `attachment_p` | Attachment | 10 |
+| `bundle_item_p` | Bundle Item | 3 |
+| `case_p` | Case | 15 |
+| `contact_address_p` | Contact Address | 9 |
+| `contact_channel_p` | Contact Channels | 12 |
+| `contact_merge_p` | Contact Merge | 7 |
+| `contact_owner_p` | Contact Owners | 4 |
+| `contact_p` | Contact | 22 |
+| `contact_rel_p` | Contact Relationship | 13 |
+| `contact_role_p` | Contact Role | 7 |
+| `currency_p` | Currency | 5 |
+| `email_p` | Email | 19 |
+| `exchange_rate_p` | Exchange Rate | 5 |
+| `file_p` | File | 11 |
+| `fiscal_period_p` | Fiscal Period | 5 |
+| `join_request_p` | Join Request | 8 |
+| `lead_p` | Lead | 13 |
+| `meeting_p` | Meeting | 21 |
+| `miner_check_p` | Miner Check | 5 |
+| `miner_delete_p` | Miner Delete | 3 |
+| `miner_sync_failure_p` | Miner Sync Failure | 8 |
+| `miner_sync_job_p` | Miner Sync Job | 7 |
+| `miner_sync_state_p` | Miner Sync State | 10 |
+| `note_p` | Note | 6 |
+| `opportunity_p` | Opportunity | 14 |
+| `product_category_item_p` | Product Category Item | 3 |
+| `product_category_p` | Product Category | 3 |
+| `product_p` | Product | 8 |
+| `security_policy_p` | Security Policy | 3 |
+| `task_p` | Task | 17 |
+| `tax_rate_p` | Tax Rate | 4 |
+| `team_p` | Team | 13 |
+| `team_role_p` | Team Role | 7 |
+| `user_p` | User | 13 |
 
 ## Before adding a field to one
 
-A platform object that takes `_c` fields is almost always the right place for one, and needs no
-new component. A field you add to `account_p`, `case_p`, `opportunity_p`, `product_p` or `team_p`
-must also be listed on each of its object types. What a platform component cannot be is
-**overridden**: its own entries stay locked. `metadata` has the details and the workarounds.
+A platform object is almost always the right place for a new field, and needs no new component.
+Plan as if it takes the field; the compile and the check-in are the only way to know whether this
+instance refuses it, and `metadata` has what to do then. A field on an object with object types
+must also be listed on each of them. What a platform component cannot be is **overridden**: its
+own entries stay locked.
 
 Two traps worth knowing before you extend one:
 

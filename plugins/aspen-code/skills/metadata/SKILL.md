@@ -96,13 +96,12 @@ Through `aspen-docs` (`searchDocumentation`, then `getPage`):
   optional.
 - **A `checkbox` `default-value` is a JSON boolean** (`false`).
 - **`searchable: true` needs a search config**; default to `false`.
-- **A new field on an object with record types** must be listed in each of its `object_type_p`
-  (`case_p.case_p` refuses this; see [platform-overlays.md](platform-overlays.md)),
-  platform ones included (`account_p.account_p`, all three `team_p` types), or typed records
-  reject it ("is not allowed for object type"). On a platform object type, overlay it with
-  `"fields": [{"name": "<field>_c", "field": "<field>_c"}]` for a custom field, or
-  `{"name": "<platform field minus _p>_c", "field": "<platform field>"}` for a platform one.
-- **Overlaying a platform component, or a write fails "Field '<x>_p' is not allowed for object
-  type":** read [platform-overlays.md](platform-overlays.md) — what refuses an overlay, which
-  entries are locked, and the `_p` fields a compile adds that object types don't get. Deploy a
-  platform overlay as its own package, so one rejection can't take your custom work with it.
+- **A new field on an object with record types** must be listed in each of its `object_type_p`,
+  platform ones included, or typed records reject it ("is not allowed for object type"). On a
+  platform object type, overlay it with `"fields": [{"name": "<field>_c", "field": "<field>_c"}]`
+  for a custom field, or `{"name": "<platform field minus _p>_c", "field": "<platform field>"}`
+  for a platform one.
+- **A platform overlay is refused, or a write fails "Field '<x>_p' is not allowed for object
+  type":** read [platform-overlays.md](platform-overlays.md) — what each refusal means, and the
+  `_p` fields a compile adds that object types don't get. Deploy a platform overlay as its own
+  package, so one rejection can't take your custom work with it.

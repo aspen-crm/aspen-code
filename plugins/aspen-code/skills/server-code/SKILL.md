@@ -34,9 +34,8 @@ why a rule belongs here and not in a page. `model-first` decides whether it belo
   statement.
 - **The crate has nothing to upgrade to.** `aspen-crm` 0.1.0 is the only version crates.io has
   ever had. Check a version against `https://crates.io/api/v1/crates/aspen-crm` before relying on
-  it, not against another instance directory's pin. On a 26.4.1 instance, `save-package` refuses a
-  trigger that calls `context.services()` (`diagnose` has the error and what to ship meanwhile).
-  Don't patch the crate or swap its dependency for another source.
+  it, not against another instance directory's pin. Don't patch the crate or swap its dependency
+  for another source.
 - The `aspen-crm` crate source is the final word on types; after the first build it is at
   `~/.cargo/registry/src/*/aspen-crm-*/src/`.
 
