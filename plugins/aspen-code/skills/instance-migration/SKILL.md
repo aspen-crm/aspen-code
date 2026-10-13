@@ -44,13 +44,15 @@ When you call the API yourself, to explore or to check a failure the script repo
 
 ## Sign-in
 
-Each command that reaches an instance opens a browser tab for the user to sign in; the token lives
-only in the script's memory until the command ends, and you never see it. Steps chained with
-`--then` share one sign-in per instance (`describe W --side target --then load`,
-`load W --run --then verify`). The chain stops at the first failing step, and a dry run can't chain
-into `load --run`: the user reads it first.
+The first command that reaches an instance opens a browser tab for the user to sign in. A
+background process then keeps that sign-in in memory, never on disk, and every later command
+reuses it without a tab, until an hour passes with no command or `signout W`. You never see the
+token. `--then` chains steps (`load W --run --then verify`) and stops at the first that fails; a
+dry run can't chain into `load --run`: the user reads it first.
 
-- Run these commands in the background; each waits for the user.
+- Run a command that may open a tab in the background; it waits for the user.
+- Instance refused the signed-in user: `signout W`, then run the command again and sign in as one
+  who can read (source) or write (target) the objects.
 - The machine must reach both instances (VPN), and the browser must run on this machine.
 - Never ask for an API key or token, and don't run `aspen login` for a migration.
 
@@ -59,7 +61,7 @@ into `load --run`: the user reads it first.
 From the target instance directory, with `aspen doctor` clean. `W` is
 `data/migrations/<source-name>`.
 
-| # | Command | Signs in to | Writes |
+| # | Command | Reaches | Writes |
 |---|---|---|---|
 | 1 | `init W --source <url> --target <url>` | nothing | `mapping.json`, `.gitignore` |
 | 2 | `describe W` | both | `schema/` |
@@ -69,6 +71,7 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 | 6 | `load W` (dry run; repeat until 0 failed) | target | `reports/plan.md` only |
 | 7 | `load W --run --limit 20` (pilot), after the user's yes | target | target records |
 | 8 | `load W --run --then verify`, after the user checked the pilot and said yes | target | target records, `reports/verify.md` |
+| 9 | `signout W` | both | nothing; revokes the kept sign-ins |
 
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
 - The pilot writes real records and nothing here can undo a bad full load: never skip it, and

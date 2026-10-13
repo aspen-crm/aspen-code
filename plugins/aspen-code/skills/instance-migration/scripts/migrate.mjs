@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Copy records from a source Aspen instance into the target instance whose directory this runs
-// in, through the REST API. The aspen CLI has no data commands. Each command that reads or writes
-// an instance signs in to it through the browser (signin.mjs) and keeps the token in memory only:
-// nothing is stored, and no token is printed.
+// in, through the REST API. The aspen CLI has no data commands. The first command that reaches an
+// instance signs in to it through the browser; a background process keeps that sign-in in memory
+// for the commands after it (signin.mjs), until an hour passes with none or `signout`. Nothing is
+// stored, and no token is printed.
 //
 //   node migrate.mjs init <workspace> --source <url> --target <url>
 //   node migrate.mjs describe <workspace> [--side source|target]   schemas → schema/
@@ -11,7 +12,8 @@
 //   node migrate.mjs load <workspace>                  dry run → reports/plan.md; writes nothing
 //   node migrate.mjs load <workspace> --run [--limit N] [--batch N]
 //   node migrate.mjs verify <workspace> [--sample N]   counts and a field-by-field sample → reports/verify.md
-//   node migrate.mjs load <workspace> --run --then verify   steps chained on one sign-in
+//   node migrate.mjs load <workspace> --run --then verify   steps chained; the first failure stops it
+//   node migrate.mjs signout <workspace> [--side source|target]   end the kept sign-ins
 //
 // The source is only read: its client has no write method. The target is written only by
 // `load --run`, and nothing is ever deleted. There is no upsert and `id_p` cannot be set on
@@ -28,7 +30,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { SignInError, signIn } from './signin.mjs'
+import { IDLE_MS, SignInError, session as openSession, signOut } from './signin.mjs'
 
 const API = `/api/v${pinnedApi()}`
 const PAGE = 1000 // AQL LIMIT cap
@@ -51,11 +53,14 @@ const HELP = `Copy records from a source Aspen instance into this directory's in
       --limit N   at most N new records per object (a pilot)
       --batch N   records per request (default ${DEFAULT_BATCH}, max ${MAX_BATCH})
   node migrate.mjs verify <workspace> [--sample N]
+  node migrate.mjs signout <workspace> [--side source|target]
 
-Each command that reaches an instance signs in to it in the browser: describe to both (or the
---side named), extract to the source, load and verify to the target. Nothing is stored.
+describe reaches both instances (or the --side named), extract the source, load and verify the
+target. The first command to reach an instance opens the browser to sign in; the commands after
+it reuse that sign-in, kept in memory by a background process until ${IDLE_MS / 60000} minutes pass with no
+command, or signout. Nothing is stored on disk.
 
-  --then <command> [options]   run another step on the same workspace and sign-in, e.g.
+  --then <command> [options]   run another step on the same workspace, e.g.
                                describe <workspace> --side target --then load
                                load <workspace> --run --then verify
   The chain stops at the first step that does not exit 0. A dry run cannot chain into
@@ -149,7 +154,7 @@ const schema = (ws, side) => {
 // ---- the REST client. The source gets only `reader`; `write` exists for the target alone.
 
 async function connect (conn, side) {
-  const session = await signIn(conn.url, { side, log: say })
+  const session = await openSession(conn.url, { side, log: say })
   const base = String(conn.url).replace(/\/+$/, '') + API
   const scrub = (s) => session.secrets().reduce((t, x) => t.split(x).join('<token>'), String(s))
   async function send (method, route, body, { retry = true } = {}) {
@@ -171,7 +176,7 @@ async function connect (conn, side) {
       // A refused request was not applied, so a write is safe to send again once.
       if (res.status === 401 || res.status === 403 || json?.failures?.some((f) => f.error_type === 'INVALID_SESSION_ID')) {
         if (!renewed) { renewed = true; await session.refreshed(); continue }
-        throw new Stop(`the ${side} instance (${conn.url}) refused the signed-in user (HTTP ${res.status}); sign in as a user who can ${side === 'target' ? 'read and write' : 'read'} the migrated objects`)
+        throw new Stop(`the ${side} instance (${conn.url}) refused the signed-in user (HTTP ${res.status}); run signout, then the command again, and sign in as a user who can ${side === 'target' ? 'read and write' : 'read'} the migrated objects`)
       }
       return { status: res.status, json, text: scrub(text.slice(0, 300)) }
     }
@@ -877,7 +882,7 @@ function options (args) {
   return { ...o, limit: count('limit', 0, Number.MAX_SAFE_INTEGER), batch: count('batch', 1, MAX_BATCH) ?? DEFAULT_BATCH, sample: count('sample', 1, 1000) ?? 20 }
 }
 
-const COMMANDS = ['init', 'describe', 'draft', 'extract', 'load', 'verify']
+const COMMANDS = ['init', 'describe', 'draft', 'extract', 'load', 'verify', 'signout']
 
 export async function main (argv) {
   const [cmd, wsArg, ...rest] = argv
@@ -887,7 +892,7 @@ export async function main (argv) {
   for (const a of rest) a === '--then' ? steps.push([]) : steps.at(-1).push(a)
   const plan = steps.map(([c, ...o]) => {
     if (!COMMANDS.includes(c)) throw new Stop(`unknown command: ${c ?? '(none after --then)'}\n\n${HELP}`)
-    if (c === 'init' && steps.length > 1) throw new Stop('init cannot be chained: run it on its own')
+    if ((c === 'init' || c === 'signout') && steps.length > 1) throw new Stop(`${c} cannot be chained: run it on its own`)
     return { cmd: c, opts: options(o) }
   })
   if (plan.some((s, i) => s.cmd === 'load' && s.opts.run && plan.slice(0, i).some((p) => p.cmd === 'load' && !p.opts.run))) {
@@ -908,7 +913,11 @@ export async function main (argv) {
   }
 
   const m = readMapping(ws)
-  // One sign-in per side for the whole chain.
+  if (cmd === 'signout') {
+    for (const side of sides(opts)) say(`${side}: ${await signOut(m[side].url) ? 'signed out' : 'no sign-in was kept'}`)
+    return 0
+  }
+  // One session per side for the whole chain.
   const opened = {}
   const open = (side) => (opened[side] ??= connect(m[side], side))
   try {
@@ -924,10 +933,14 @@ export async function main (argv) {
   }
 }
 
+function sides (opts) {
+  if (opts.side && !['source', 'target'].includes(opts.side)) throw new Stop('--side is source or target')
+  return opts.side ? [opts.side] : ['source', 'target']
+}
+
 async function run (cmd, ws, m, opts, open) {
   if (cmd === 'describe') {
-    if (opts.side && !['source', 'target'].includes(opts.side)) throw new Stop('--side is source or target')
-    for (const side of opts.side ? [opts.side] : ['source', 'target']) {
+    for (const side of sides(opts)) {
       const { reader } = await open(side)
       const s = await describeInstance(reader)
       writeJson(ws.path('schema', `${side}.json`), { url: m[side].url, described: new Date().toISOString(), ...s })

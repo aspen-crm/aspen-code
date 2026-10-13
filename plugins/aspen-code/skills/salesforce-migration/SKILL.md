@@ -32,11 +32,14 @@ From the target instance directory, with `aspen doctor` clean. `W` is `data/migr
 |---|---|---|---|
 | 1 | `sfmigrate init W --from-export <dir>`, or `--org <alias>` for a live org | nothing, or the `sf` CLI | `mapping.json`, `.gitignore`; prints the objects and their record counts |
 | 2 | **Ask which objects to migrate**: one multi-select, with the counts | nothing | — |
-| 3 | `sfmigrate plan W --objects <their choice>` | Aspen once (browser); Salesforce only without an export | `schema/`, `mapping.json`, `reports/gaps.md`, `mapping/fields.csv` |
+| 3 | `sfmigrate plan W --objects <their choice>` | Aspen; Salesforce only without an export | `schema/`, `mapping.json`, `reports/gaps.md`, `mapping/fields.csv` |
 | 4 | **One decision round per object** (below) | nothing | `mapping.json` |
 | 5 | `sfmigrate extract W`, then `migrate load W` (dry run) | the export or Salesforce; Aspen | `extract/`, `reports/plan.md` |
 | 6 | After the user's one yes for the write: `migrate load W --run --limit 20 --then load --run --then verify` | Aspen | target records, `reports/verify.md` |
 
+- Aspen sign-in: `plan` opens one browser tab, and every Aspen command after it reuses that
+  sign-in until an hour passes with none ([instance-migration](../instance-migration/SKILL.md)
+  `## Sign-in`). Run `migrate signout W` when done.
 - `plan` is describe, the target's describe, probe and draft in one run. `--keep-target` reuses
   `schema/target.json` (no sign-in); `--redraft` drafts settled objects again. An object that had
   no target is drafted again on its own once the target has one.

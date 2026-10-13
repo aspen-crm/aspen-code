@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -8,12 +8,18 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
-import { signIn } from '../skills/instance-migration/scripts/signin.mjs'
+import { session, signIn, signOut, socketFor } from '../skills/instance-migration/scripts/signin.mjs'
 
 const plugin = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(plugin, 'skills', 'instance-migration', 'scripts', 'migrate.mjs')
 const PINNED_API = JSON.parse(readFileSync(join(plugin, 'xplatform.json'), 'utf8')).api
 const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
+// Kept sign-ins listen on sockets under the temp dir: a short one here, so the paths fit, and
+// every test signs out of the instances it made.
+const TMP = mkdtempSync('/tmp/am-')
+process.env.TMPDIR = TMP
+after(() => rmSync(TMP, { recursive: true, force: true }))
 
 // ---- a fake Aspen instance: sign-in, describe, query and record writes, with the rules the real
 // one enforces. Sign-in follows the dev pod: the resource is the origin, PKCE S256 is required,
@@ -277,7 +283,7 @@ async function setup (t, { target = targetRecords(), failCreate, warnCreate, exp
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
   const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords(), api })
   const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], currency_code_p: ['usd_p', 'eur_p'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
-  t.after(() => { src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
+  t.after(async () => { await Promise.all([signOut(src.url), signOut(tgt.url)]); src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
   writeFileSync(join(dir, '.aspen', 'config.toml'), `instance = "${tgt.url}"\n`)
@@ -340,6 +346,61 @@ test('a callback that does not carry this sign-in\'s state is refused', async t 
   }
   await assert.rejects(signIn(inst.url, { side: 'target', openBrowser: forge, log: () => {}, timeoutMs: 5000 }), /wrong state/)
   assert.equal(inst.grants.code, 0, 'no token was issued')
+})
+
+// The browser of a user who is signed in: it follows the authorize redirect to the callback.
+const follow = (count) => async (url) => {
+  count.n = (count.n ?? 0) + 1
+  const r = await fetch(url, { redirect: 'manual' })
+  await fetch(r.headers.get('location'))
+}
+
+test('one sign-in per instance serves every later command; signout revokes it', async t => {
+  const s = await setup(t)
+  await s.ready() // describe signs in to both; extract reuses the source's
+  assert.deepEqual([s.src.grants.code, s.tgt.grants.code], [1, 1])
+  for (const args of [['load', s.ws], ['load', s.ws, '--run', '--limit', '1'], ['verify', s.ws]]) {
+    const r = await s.run(...args)
+    assert.ok(r.status <= 1, r.stderr)
+    assert.match(r.stdout, /target: using the sign-in kept from an earlier command/)
+  }
+  assert.equal(s.tgt.grants.code, 1, 'no command after the first opened the browser')
+  const out = await s.run('signout', s.ws)
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /source: signed out\ntarget: signed out/)
+  assert.equal(s.src.live.size + s.tgt.live.size, 0, 'signout revokes both refresh tokens')
+  assert.match((await s.run('signout', s.ws, '--side', 'target')).stdout, /target: no sign-in was kept/)
+  assert.equal((await s.run('load', s.ws)).status, 0)
+  assert.equal(s.tgt.grants.code, 2, 'after signout the next command signs in again')
+})
+
+test('a kept sign-in ends on its own after its idle time, revoked', async t => {
+  const inst = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: {}, records: {} })
+  t.after(async () => { await signOut(inst.url); inst.close() })
+  const opened = {}
+  const quiet = { side: 'target', log: () => {}, openBrowser: follow(opened), idleMs: 300 }
+  const first = await session(inst.url, quiet)
+  assert.ok(await first.bearer())
+  assert.equal(inst.live.size, 1)
+  const reused = await session(inst.url, quiet)
+  assert.equal(await reused.bearer(), await first.bearer())
+  assert.equal(opened.n, 1, 'the second session opened no browser')
+  await new Promise((resolve) => setTimeout(resolve, 1000))
+  assert.equal(inst.live.size, 0, 'the idle holder revoked its refresh token')
+  await assert.rejects(first.bearer(), /sign-in ended/)
+  await session(inst.url, quiet)
+  assert.equal(opened.n, 2, 'once it ended, the next session signs in again')
+})
+
+test('a socket left by a holder that died is taken over', async t => {
+  const inst = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: {}, records: {} })
+  t.after(async () => { await signOut(inst.url); inst.close() })
+  writeFileSync(socketFor(inst.url), '')
+  const opened = {}
+  const quiet = { side: 'target', log: () => {}, openBrowser: follow(opened) }
+  await (await session(inst.url, quiet)).bearer()
+  await (await session(inst.url, quiet)).bearer()
+  assert.equal(opened.n, 1, 'the new holder serves the second session')
 })
 
 test('an access token refused mid-load is refreshed, and the load finishes', async t => {
@@ -565,9 +626,8 @@ test('--then runs the next steps on the same sign-in, and stops at the first tha
   const before = s.tgt.grants.code
   const r = await s.run('describe', s.ws, '--side', 'target', '--then', 'load', '--run', '--then', 'verify')
   assert.equal(r.status, 0, r.stdout + r.stderr)
-  assert.equal(s.tgt.grants.code - before, 1, 'one sign-in for describe, load and verify')
+  assert.equal(s.tgt.grants.code - before, 0, 'describe, load and verify reuse the kept sign-in')
   assert.ok(existsSync(join(s.ws, 'reports', 'verify.md')))
-  assert.equal(s.tgt.live.size, 0, 'the sign-in is revoked when the chain ends')
 })
 
 test('a dry run cannot chain into load --run', async t => {
@@ -794,5 +854,9 @@ test('no token is written into the workspace, and every refresh token is revoked
     const body = readFileSync(file, 'utf8')
     assert.ok(!issued.some(tok => body.includes(tok)), `${file} holds a token`)
   }
+  const kept = dirname(socketFor(s.tgt.url))
+  assert.equal(statSync(kept).mode & 0o777, 0o700, 'the holders\' directory is this user\'s alone')
+  for (const file of walk(kept)) assert.ok(statSync(file).isSocket(), `${file} is not a socket`)
+  assert.equal((await s.run('signout', s.ws)).status, 0)
   assert.equal(s.src.live.size + s.tgt.live.size, 0, 'a refresh token was left unrevoked')
 })
