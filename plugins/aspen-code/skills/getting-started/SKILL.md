@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: Use when the aspen CLI is not installed or out of date, not signed in, signed in to the wrong instance, there is no instance directory yet, or its build dependencies (Rust toolchain, crates, Node, npm packages) are missing — on a fresh machine, a first session, or when the session-start note says so. Installs or updates the CLI (with consent), hands the user the OAuth sign-in, creates the instance directory with aspen init, installs its dependencies, and checks it with aspen doctor.
+description: Use when the aspen CLI is not installed or out of date, not signed in, signed in to the wrong instance, there is no instance directory yet, or its build dependencies (Rust toolchain, crates, Node, npm packages) are missing — on a fresh machine, a first session, or when the session-start note says so. Installs or updates the CLI (with consent), runs the OAuth sign-in the user approves in the browser, creates the instance directory with aspen init, installs its dependencies, and checks it with aspen doctor.
 ---
 
 # Getting started
@@ -73,29 +73,44 @@ line for their shell to add in their own editor; new terminals then find `aspen`
 
 If they would rather not, the full path works everywhere.
 
-## 2. Sign in — the user does this, with OAuth
+## 2. Sign in — you run it, the user approves in the browser
 
-`aspen login` opens a browser for OAuth and refuses to run under an agent ("Interactive login is
-not supported (an agent is driving this invocation)") or without a terminal. That is deliberate.
-**Do not try to run it, and do not suggest `--api-key`** — this plugin never handles a secret.
+`aspen login` is OAuth in a browser. Under an agent it refuses ("Interactive login is not
+supported (an agent is driving this invocation)") unless told the user is there to approve:
+`--agent no` overrides the agent detection for that one command, and `ASPEN_INTERACTIVE=1` the
+terminal detection. **Never pass `--api-key`/`-k`** — this plugin never handles a secret. The
+guard hook refuses any other shape of `aspen login`.
 
 Ask for the instance URL if you do not have it — it looks like
 `https://<host>/<domain>/<instance>`, the address of the instance in the browser minus anything
-after the instance name. Then give the user this, filled in, and wait:
+after the instance name. Tell the user: *a browser will open — sign in to the instance and
+approve.* Then run it, filled in, with a timeout of at least 6 minutes (the CLI waits up to 5 for
+the approval). Use the full path from step 1 if `aspen` is not on this session's PATH.
 
-> **About a minute, in your own terminal** (VS Code: **Terminal → New Terminal**; not the `!`
-> prefix, which runs as the agent and is refused):
->
-> ```
-> aspen login -i https://<host>/<domain>/<instance>
-> ```
->
-> A browser opens; sign in to the instance and approve. Come back when the terminal says
-> "Login succeeded".
+macOS / Linux:
+
+```sh
+ASPEN_INTERACTIVE=1 aspen login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:ASPEN_INTERACTIVE='1'; aspen login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring; Remove-Item Env:ASPEN_INTERACTIVE
+```
+
+- **The browser didn't open:** the CLI prints "Open this URL to log in…". Give the user that URL;
+  it carries no secret.
+- **"Login succeeded"** ends it. The token goes from the browser to the CLI and the OS keyring;
+  you never see it. Don't add `--debug`.
+- **No keyring** (a headless Linux box): `--credential-store keyring` fails rather than ask about
+  a file, a question you cannot answer. Hand the user `aspen login -i <url>` to run in their own
+  terminal (VS Code: **Terminal → New Terminal**), where the CLI can ask them, and wait for "Login
+  succeeded".
+- **Denied or timed out:** say so and offer to run it again.
 
 The CLI holds **one login at a time** — signing in to another instance replaces the current one.
-The token goes to the OS keyring; if there is none (a headless Linux box), the CLI asks the user
-in their terminal before writing it to a file. You never see it either way.
+Say so before you sign in while it is signed in elsewhere.
 
 **Check:** `aspen doctor` in the instance directory reports `instance.logged-in` and
 `instance.credential-accepted` as `ok`. Before a directory exists, read the `instance` field of
@@ -113,8 +128,8 @@ What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matte
   `.aspen/config.toml`; the parent may hold anything. It never overwrites a file you authored. Run
   again from **inside** an instance directory, it completes a fresh clone or refreshes the fetched
   `platform/` and `active/` layers.
-- Don't move the session there yet. Steps 4 and 5 take `<dir>` as an argument, and step 6 asks
-  the user before switching.
+- Don't move the session there yet. Steps 4 and 5 take `<dir>` as an argument, and step 6 moves
+  it.
 
 **Check:** `.aspen/config.toml` names the instance you signed in to.
 
@@ -171,18 +186,15 @@ Not fine, stop and tell the user:
 - `configuration.record-matches-login` — signed in to a different instance than this directory's.
   Back to step 2 with this directory's URL.
 
-## 6. Switch to the new directory — ask
+## 6. Move into the new directory
 
 Only when step 3 created a new instance directory. Every `aspen` command runs from inside it, so
-ask: *Setup is done. Switch this session to `<dir>`?*
+`cd <dir>` — don't ask — and tell the user the session is now there. Suggest `git init` and a
+first commit.
 
-- **Yes:** `cd <dir>` and say you did. If the check fails (the host resets the directory between
-  commands), tell the user to reopen the host there (VS Code: **File → Open Folder**).
-- **No:** leave the session where it is. Tell them to reopen the host in `<dir>` before building.
-
-Either way, suggest `git init` and a first commit.
-
-**Check:** after a yes, `pwd` in a separate command prints `<dir>`.
+**Check:** `pwd` in a separate command prints `<dir>`. If it doesn't, the host keeps the session
+in the folder it started in (Claude Code does when `<dir>` is outside it): tell the user to
+reopen the host in `<dir>` (VS Code: **File → Open Folder**) before building.
 
 Then hand off to `using-aspen`.
 

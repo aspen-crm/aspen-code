@@ -16,15 +16,15 @@ Four facts, in this order. The session-start note states them when hooks are on;
 | Fact | How to tell | If not |
 |---|---|---|
 | The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` §1 |
-| It is signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` §2 — the **user** runs `aspen login` |
+| It is signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` §2 — you run `aspen login`, the user approves in the browser |
 | You are in that instance's directory | a `.aspen/config.toml` here or above | `getting-started` §3 — `aspen init` |
 | Its build dependencies are installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` §4 — `install-deps.mjs` |
 
 Then run **`aspen doctor`** once in the instance directory. It is the CLI's own readiness report
 (JSON when an agent runs it, one `id` + `status` per finding, exit 1 only on a `problem`). Fix
 every `problem` before authoring; read the `fix` it gives — except `instance.logged-in` and
-`instance.credential-accepted`, whose fixes name `--api-key`: hand the user `aspen login -i <url>`
-instead (`getting-started` §2).
+`instance.credential-accepted`, whose fixes name `--api-key`: sign in with OAuth instead, in the
+shape `getting-started` §2 gives.
 `instance.cli-matches-instance` failing means
 the CLI and the instance are on different releases — nothing will compile or deploy correctly
 until that is resolved (see `diagnose`).
@@ -71,7 +71,7 @@ what it actually does) and the compiler first, then real components in `metadata
 
 | The docs say | Actually |
 |---|---|
-| Log in with `aspen login -i <url> -k <api-key>` | `-k` still exists, but this plugin never uses an API key. Without it, `aspen login -i <url>` is OAuth in a browser, run **by the user** in their own terminal (it refuses under an agent or without a terminal). |
+| Log in with `aspen login -i <url> -k <api-key>` | `-k` still exists, but this plugin never uses an API key. Without it, `aspen login -i <url>` is OAuth in a browser; under an agent it needs `--agent no` and `ASPEN_INTERACTIVE=1` (`getting-started` §2). |
 | `aspen download aspenc` fetches the validator | No `download` command exists. aspenup installs `aspenc` with `aspen`; `aspen compile --metadata` runs it. |
 | `aspen move --rust --dev` for fast Rust iteration | It looks for code in `server/` and `ui/`, not the `rust/` and `typescript/` that `aspen init` creates. Deploy code through the check-in chain until that is fixed. |
 | A `custom_page` tab's `page-ui-code` is a URL template | The form that passed check-in is `ui_main_c.<route name>` (see `metadata/metadata-shapes.md`). |
@@ -116,8 +116,9 @@ copy the shape, change it, compile.
   `.aspen/config.toml` there names the instance the user means *and* the one the CLI is signed
   in to. Never point a command at another instance's folder without the user asking. A
   guard hook enforces this (Claude Code asks or refuses; Codex refuses and says how to confirm).
-- **Never handle credentials.** Never pass `aspen login` an API key (`-k`); without one it is
-  OAuth in a browser and refuses to run from an agent. The user runs it. You never see, type, ask for, or print a token or API key.
+- **Never handle credentials.** Never pass `aspen login` an API key (`-k`). Sign in with OAuth in
+  the shape `getting-started` §2 gives: you run it, the user approves in the browser, and the
+  token goes to the OS keyring. You never see, type, ask for, or print a token or API key.
 - **`aspen compile` before every deploy.** It runs the instance's own validator offline and
   reports what `checkin-prep` would, without a round trip on the shared instance.
 - **Deploying changes a shared instance.** Confirm with the human before `aspen move save-package`
@@ -133,7 +134,7 @@ copy the shape, change it, compile.
 | Thought | Reality |
 |---|---|
 | "I'll `cd` to the other instance folder and deploy there too" | A different instance. Only when the user asked for that folder — the guard will ask. |
-| "I'll run `aspen login` for them" | It refuses under an agent. Hand the command to the user. |
+| "I'll pass `--api-key` so login works under an agent" | Never. Run the OAuth login in the `getting-started` §2 shape; the user approves in the browser. |
 | "I'll edit `metadata/compiled/` / `active/`" | Replaced on the next compile/fetch. Author in `metadata/custom/`. |
 | "I'll guess the attribute name" | Copy a real component from `metadata/compiled/` or `platform/`. |
 | "It compiled, so it works" | Deploy, then a record round-trip. |
