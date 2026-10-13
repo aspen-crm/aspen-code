@@ -17,9 +17,9 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **The model never handles a credential.** It runs OAuth `aspen login` with `--agent no` and
   `ASPEN_INTERACTIVE=1` (`getting-started` §2): the user approves in the browser and the token
   goes to the OS keyring. Never `--api-key`.
-  `instance-migration` signs in through the browser for each command, or once for a chain of
-  `--then` steps (`scripts/signin.mjs`); the token lives only in that process's memory and is
-  never written.
+  `instance-migration` signs in through the browser once per instance (`scripts/signin.mjs`): a
+  background process keeps the token in memory, behind a socket in a 0700 directory, until an hour
+  passes with no command or `signout`, then revokes it. It is never written to disk.
 - **Every skill is routed from `using-aspen`**, and its frontmatter `description` says *when* to
   use it. Keep bodies procedures, not essays.
 - **Agents are read-only** — never give `schema-explorer` or `metadata-reviewer` Write/Edit.

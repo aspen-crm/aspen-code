@@ -49,14 +49,15 @@ const HELP = `Map a Salesforce object onto this Aspen instance and build the ext
   node sfmigrate.mjs init <workspace> --from-export <dir>    a Salesforce export on disk
   node sfmigrate.mjs init <workspace> --org <alias|username> a live org through the sf CLI
   node sfmigrate.mjs plan <workspace> --objects <SFDC objects> [--keep-target] [--redraft]
-      describe, the Aspen target's describe (one browser sign-in), probe and draft in one run
+      describe, the Aspen target's describe, probe and draft in one run
   node sfmigrate.mjs describe <workspace> --objects <SFDC objects, comma-separated>
   node sfmigrate.mjs probe <workspace> [--objects <subset>] [--sample 500]
   node sfmigrate.mjs draft <workspace> [--objects <subset>] [--redraft]
   node sfmigrate.mjs gaps <workspace>
   node sfmigrate.mjs extract <workspace> [--limit N] [--mode bulk|rest]
 
-The Aspen side stays with the instance-migration skill's migrate.mjs: load, pilot and verify.
+The Aspen side stays with the instance-migration skill's migrate.mjs: load, pilot, verify and
+signout. The first Aspen command opens the browser to sign in; later ones reuse that sign-in.
 
 Salesforce is reached through the \`sf\` CLI only, and not at all for an export. Nothing is written
 to Salesforce.`
@@ -218,9 +219,9 @@ function profile (rows, S, names, into = { records: 0, fields: {} }) {
   return into
 }
 
-// The Aspen half of plan: the instance-migration skill's describe, which signs in through the browser.
+// The Aspen half of plan: the instance-migration skill's describe, on the kept sign-in or a new one.
 function describeTarget (ws) {
-  say('== target: the Aspen instance (sign in through the browser tab that opens)')
+  say('== target: the Aspen instance')
   const r = spawnSync(process.execPath, [MIGRATE, 'describe', ws.dir, '--side', 'target'], { stdio: 'inherit', cwd: ws.root })
   if (r.status !== 0) throw new Stop(`describing the target failed (exit ${r.status}); run migrate.mjs describe <workspace> --side target to see why`, r.status || 1)
 }

@@ -43,8 +43,8 @@ document it follows; a person can work it too.
    metadata and Rust triggers, validate offline with `aspen compile`, deploy through the check-in
    chain with the user's go-ahead, and prove it with a record round-trip.
 6. **Migrates records** from another Aspen instance with a bundled script. It uses the REST API,
-   and the user signs in to each instance in the browser when a command needs it; the token is
-   never stored, and the model never sees it. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
+   and the user signs in to each instance in the browser once; the sign-in is kept in memory for
+   the commands that follow, never stored, and the model never sees it. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
 
 | Skill | When |
 |---|---|
