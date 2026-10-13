@@ -85,8 +85,8 @@ gap. Do not report "matches Aspen" based on token lint, a successful deploy, or 
   `@aspen-crm/sdk/tokens/*` (see [Typed token modules](#typed-token-modules)). Check `exports` in
   the installed SDK's `package.json` rather than assuming.
   - A directory `aspen init` scaffolded on 26.4.1 has SDK 0.1.0, which ships no token snapshot,
-    and the platform does not render its pages. Tell the human, and with their go-ahead pin the
-    CDN's 0.2.0 (`SKILL.md`, "Before the first file").
+    and the platform does not render its pages. Pin the CDN's 0.2.0 first (`SKILL.md`, "Before
+    the first file").
 - **Those inspected SDK versions expose no component library to import.** Component token
   families (`--ap-comp-button-*`, etc.) are token namespaces, not component modules. Check the installed SDK's public
   exports once when starting UI work, and again after an SDK upgrade. Prefer supported platform
@@ -176,11 +176,11 @@ Rules that matter:
 - **SDK without a snapshot (0.1.0)?** If `node_modules/@aspen-crm/sdk/dist/manifest.json` has no
   `tokenStyleSheetFilePath`, there is no snapshot, no token modules, no `.d.ts` to read names
   from, and no build or hook check of names: a misspelled name passes silently. The host's tokens
-  do not inherit into the page, and the platform refuses to render it. Tell the human, and with
-  their go-ahead pin the CDN's 0.2.0 (`SKILL.md`, "Before the first file"). If they would rather
-  write the code first, read names off a native element in the running instance (computed styles
-  in browser devtools), copy them exactly, and keep the light-value fallback. x-cli 0.2.0 fails the build against such an SDK, so raise
-  `@aspen-crm/sdk` and `@aspen-crm/x-cli` together, as the instance directory's `AGENTS.md` says.
+  do not inherit into the page, and the platform refuses to render it. Pin the CDN's 0.2.0 first
+  (`SKILL.md`, "Before the first file"), raising `@aspen-crm/sdk` and `@aspen-crm/x-cli` together:
+  x-cli 0.2.0 fails the build against the 0.1.0 SDK. Until then, read names off a native element
+  in the running instance (computed styles in browser devtools), copy them exactly, and keep the
+  light-value fallback.
 - **Rebuilding an Aspen component? Take its tokens. Building something new? Compose from the
   semantic layer.** The semantic tokens are the design vocabulary and cover most of a page, so
   they are the right default for anything Aspen does not already publish — a magnitude bar in a

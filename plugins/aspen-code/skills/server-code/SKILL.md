@@ -32,6 +32,12 @@ why a rule belongs here and not in a page. `model-first` decides whether it belo
 - **Querying?** [query-notes.md](query-notes.md) first: `LIMIT` at most 1000, `OFFSET` at most
   10000, `CURRENT_USER()` and `LIKE` limits. Never interpolate request-supplied text into a
   statement.
+- **The crate has nothing to upgrade to.** `aspen-crm` 0.1.0 is the only version crates.io has
+  ever had; x-platform 26.4.1 still labels its crate 0.1.0, and no public repo carries the source.
+  Believe a version only from `Cargo.lock` or `https://crates.io/api/v1/crates/aspen-crm`, never
+  from a pin someone typed. On a 26.4.1 instance, `save-package` refuses a trigger that calls
+  `context.services()` (`diagnose` has the error and what to ship meanwhile). Don't patch the crate
+  or point it at an x-platform checkout.
 - The `aspen-crm` crate source is the final word on types; after the first build it is at
   `~/.cargo/registry/src/*/aspen-crm-*/src/`.
 

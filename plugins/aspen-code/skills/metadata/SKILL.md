@@ -55,11 +55,15 @@ instance directory's `AGENTS.md` owns paths and naming; the docs own each type's
    causes:
 
    ```sh
-   aspen compile --metadata > /tmp/aspen-compile.out 2>&1; grep -v 'skipped due to other errors' /tmp/aspen-compile.out
+   aspen compile --metadata > /tmp/aspen-compile.out 2>&1
+   node "<this skill's dir>/../diagnose/scripts/causes.mjs" /tmp/aspen-compile.out
    ```
 
-   Fix every cause it names and compile again until it passes. If only cascade lines come back,
-   the cause is in `active/` or `platform/`, usually version skew: `diagnose`.
+   Under an agent the failure is one JSON `detail` string, so `grep -v` drops the causes with the
+   cascade; the script reads either shape. Fix every cause and compile again until it passes. If
+   only cascade lines come back, the cause is in `active/` or `platform/`, usually version skew:
+   `diagnose`. Before you call a failure a platform limit, compile once more changing one thing
+   (a label-only overlay against a `fields` change, say).
 
 4. **Read the result** in `metadata/compiled/` (your source with the platform merged in), then
    `build-and-deploy`.
@@ -92,7 +96,8 @@ Through `aspen-docs` (`searchDocumentation`, then `getPage`):
   optional.
 - **A `checkbox` `default-value` is a JSON boolean** (`false`).
 - **`searchable: true` needs a search config**; default to `false`.
-- **A new field on an object with record types** must be listed in each of its `object_type_p`,
+- **A new field on an object with record types** must be listed in each of its `object_type_p`
+  (`case_p.case_p` refuses this; see [platform-overlays.md](platform-overlays.md)),
   platform ones included (`account_p.account_p`, all three `team_p` types), or typed records
   reject it ("is not allowed for object type"). On a platform object type, overlay it with
   `"fields": [{"name": "<field>_c", "field": "<field>_c"}]` for a custom field, or

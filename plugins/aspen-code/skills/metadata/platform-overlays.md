@@ -1,8 +1,9 @@
 # Platform overlays: what refuses, what is locked
 
 Read before planning an overlay of a platform (`_p`) component, and when a record write fails
-"Field '<x>_p' is not allowed for object type". Checked against 26.4.1; the authority is each
-object's `extensibility` and each component's `locks` in `metadata/platform/`.
+"Field '<x>_p' is not allowed for object type". Checked against 26.4.1. The compiler is the
+authority: `extensibility` and `locks` in `metadata/platform/` don't list every lock, so test a
+plan with a minimal overlay and `aspen compile --metadata` before building on it.
 
 ## What refuses an overlay
 
@@ -14,7 +15,10 @@ object's `extensibility` and each component's `locks` in `metadata/platform/`.
 - A platform field cannot be retired: its `active` is locked.
 - A `_c` layout for a platform object is refused ("reserved for the platform"): extend the platform
   layout instead. A layout for your own object type on a platform object is fine.
-- Platform object types, most platform picklists and `aspen_crm_p` take new `_c` entries. Their
+- `case_p.case_p` locks `fields` though its JSON shows no lock: a label-only overlay compiles, and
+  any `fields` change fails "attribute 'case_p.case_p.fields' is locked and cannot be extended".
+  A new case field needs a custom object type on `case_p` that lists it, and records of that type.
+- Other platform object types, most platform picklists and `aspen_crm_p` take new `_c` entries. Their
   platform entries are locked, except a picklist item's `label`, `description` and usually
   `active`, plus `parent-objects` on most object-dependent picklists: widen those rather than
   forcing data to fit.

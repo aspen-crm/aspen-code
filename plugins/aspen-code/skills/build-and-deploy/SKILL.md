@@ -26,7 +26,7 @@ that looks fine and changed nothing.
 ## 2. Pre-flight
 
 - `aspen doctor` — no `problem` (other than `typescript.sdk-pins` with the SDK pinned to the CDN,
-  `using-aspen` known issues); in particular `instance.cli-matches-instance`,
+  `custom-ui` "Before the first file"); in particular `instance.cli-matches-instance`,
   `configuration.record-matches-login` and `instance.no-package-in-flight` are `ok`.
 - `aspen status` — no check-in in flight (possibly someone else's). If one is, wait and tell the
   human; don't clear it.
@@ -64,7 +64,7 @@ the exact verb and say its scope:
 2. Only when the instance says to ("invoke the checkin-clear action"): `aspen move checkin-clear` —
    halts the active check-in and erases the dev and dev-checkin sets.
 
-Don't use the development override (`aspen move --rust --dev`; see `using-aspen` known issues).
+Don't use the development override (`aspen move --rust --dev`; see `using-aspen` → where the docs are wrong).
 `aspen move clear-dev` removes one if it exists.
 
 ## 5. Prove it — the round-trip

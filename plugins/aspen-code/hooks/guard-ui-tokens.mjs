@@ -583,11 +583,10 @@ export function decide (filePath, content, known, whole = true) {
         'inline styles, import them from `@aspen-crm/sdk/tokens/sem` or `/comp` instead of ' +
         'writing the string. '
       : 'The installed `@aspen-crm/sdk` ships no token snapshot (0.1.0, what `aspen init` pins, ' +
-        'has none), so there are no typed token modules and nothing checks a name. Read names ' +
-        'off a native element in the running instance, and keep the light value as the `var()` ' +
-        'fallback. The platform does ' +
-        'not render a page on such an SDK: tell the human, and with their go-ahead pin the 0.2.0 ' +
-        'SDK and x-cli the instance\'s CDN serves (custom-ui `SKILL.md`, "Before the first file"). ') +
+        'has none), so there are no typed token modules, nothing checks a name, and the platform ' +
+        'does not render a page on it. Pin the 0.2.0 SDK and x-cli the instance\'s CDN serves ' +
+        '(custom-ui `SKILL.md`, "Before the first file") and tell the human you did; until then, ' +
+        'read names off a native element and keep the light value as the `var()` fallback. ') +
     'If a value genuinely has no token, keep it and put ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above.'
   )

@@ -11,26 +11,27 @@ surface (a route, a layout section, a `custom_page` tab).
 
 ## Before the first file: check the SDK
 
-Read `typescript/node_modules/@aspen-crm/sdk/dist/manifest.json`. With no
-`tokenStyleSheetFilePath` in it, the installed SDK is the 0.1.0 that `aspen init` pins, built for
-the previous release (`using-aspen` known issues), and the platform will refuse to render the page
-("SDK is no longer supported"). The 26.4.1 SDK and x-cli, 0.2.0, are on the instance environment's
-static-assets CDN. Tell the human, and with their go-ahead pin them:
+`aspen init` 26.4.1 pins npm's `@aspen-crm/sdk` and `@aspen-crm/x-cli` 0.1.0, and a 26.4.1
+instance refuses to render a page built on them ("SDK is no longer supported"). The platform loads
+the SDK from the CDN at runtime, but the release it loads is the one x-cli records from the
+installed package, and npm's 0.1.0 records the previous release, whose SDK has no token stylesheet.
+The 26.4.1 packages (0.2.0) are on the instance environment's static-assets CDN. If
+`typescript/node_modules/@aspen-crm/sdk/dist/manifest.json` has no `tokenStyleSheetFilePath`, pin
+them, then tell the human you did:
 
-1. `<cdn>` is the `cdn:` line of `aspenup show` (or derived as `getting-started` step 1 says).
-   `curl -s <cdn>/sdk/platform/26.4.1/latest` names the current build as `pversion_bugfix`, e.g.
-   `26.4.1.20`.
-2. In `typescript/package.json`, set the two pins to the tarballs of that build:
+1. `<cdn>` is the `cdn:` line of `aspenup show`. `curl -s <cdn>/sdk/platform/26.4.1/latest` names
+   the current build as `pversion_bugfix` (e.g. `26.4.1.20`); any 26.4.1 build records `26.4.1`.
+2. In `typescript/package.json`:
    ```json
    "dependencies":    { "@aspen-crm/sdk":   "<cdn>/npm/platform/sdk/26.4.1/<pversion_bugfix>/aspen-crm-sdk-0.2.0.tgz" },
    "devDependencies": { "@aspen-crm/x-cli": "<cdn>/npm/platform/x-cli/26.4.1/<pversion_bugfix>/aspen-crm-x-cli-0.2.0.tgz" }
    ```
-3. `cd typescript && npm install` (it rewrites `package-lock.json`; suggest committing both), then
-   check that the manifest now has `tokenStyleSheetFilePath`.
+3. `cd typescript && npm install` (it rewrites `package-lock.json`; suggest committing both), and
+   check the manifest now has `tokenStyleSheetFilePath`.
 
-`aspen doctor` then reports `typescript.sdk-pins` as a `problem`; that is expected (`using-aspen`
-known issues). Never point the pins at an x-platform checkout. Token names, the typed token modules
-and the build's token check below all need SDK and x-cli 0.2.0.
+`aspen doctor` then reports `typescript.sdk-pins` as a `problem`, because it reads any URL as a
+range. That is expected; its fix would restore 0.1.0, so don't apply it. Token names, the typed
+token modules and the build's token check below all need the 0.2.0 pair.
 
 ## 1. Where it goes
 

@@ -16,11 +16,15 @@ Reproduce and find the cause before any fix, routing on what the CLI actually pr
    package, code override, checked-in code) answer most "why" questions.
 3. **Localize.** Drop the cascade and read what is left:
    ```sh
-   grep -vE 'skipped due to other errors|another component failed validation' /tmp/aspen.out
+   node "<this skill's dir>/scripts/causes.mjs" /tmp/aspen.out
    ```
-   One bad component fails the whole batch and every other reports it was skipped. Fix every cause
-   the filtered output names before re-running — each check-in round trip costs the shared
-   instance.
+   One bad component fails the whole batch and every other reports it was skipped. Under an agent
+   the CLI prints all of it as one JSON `detail` string, so `grep -v` on it drops the causes too;
+   the script reads either shape. Fix every cause it names before re-running — each check-in round
+   trip costs the shared instance.
+   **Before you call a cause a platform limit,** vary one thing and compile again — a label-only
+   overlay against a `fields` change, say. It takes seconds, and a wrong call ships a permanent
+   workaround.
 4. **Smallest change, re-run,** confirm the error is gone.
 5. **Record the lesson** if it was non-obvious (below).
 
@@ -31,8 +35,8 @@ Reproduce and find the cause before any fix, routing on what the CLI actually pr
 | `aspen compile --metadata` fails on components you never touched: "supplied active metadata failed validation; pending components were not validated" | Version skew: the CLI's validator is another release than the instance, so its own `active/` fails | `aspen doctor` → `instance.cli-matches-instance`; `aspenup update` installs the toolchain the instance serves. If aspenup says nothing is published for that release, tell the human; don't work around it |
 | Doctor: `configuration.record-matches-login`; `move`/`status` refuse | Signed in to another instance (one login at a time) | Tell the user it replaces the current login, then `getting-started` step 2 with this directory's URL |
 | `aspen login`: "Interactive login is not supported" | Run under an agent without the overrides | The `getting-started` step 2 shape. Never `--api-key` |
-| A custom page: "Version … of the "sdk" SDK is no longer supported. Please upgrade the SDK and redeploy." | Built against the `@aspen-crm/sdk` 0.1.0 `aspen init` pins (`using-aspen` known issues) | With the human's go-ahead, pin the CDN's 0.2.0 SDK and x-cli (`custom-ui` "Before the first file"), rebuild and redeploy |
-| Check-in refuses the server component: "query-service@0.1.0 … no matching implementation in the linker" | crates.io `aspen-crm` 0.1.0 predates the 26.4.1 host (`using-aspen` known issues) | Tell the human it needs a matching `aspen-crm` release; don't patch the crate |
+| A custom page: "Version … of the "sdk" SDK is no longer supported. Please upgrade the SDK and redeploy." | Built against the `@aspen-crm/sdk` 0.1.0 `aspen init` pins | Pin the CDN's 0.2.0 SDK and x-cli (`custom-ui` "Before the first file"), rebuild and redeploy |
+| `save-package` refuses the server component: "failed to pre-link component imports: component imports instance `aspen-crm:platform/query-service@0.1.0`, but a matching implementation was not found in the linker" | Not a missing service: the 26.4.1 host links `query-service` and the rest. wasmtime says the same for a type mismatch, and this is one: the `record-field-value` that `query-service` uses gained a `json` case in 26.4.1, after crates.io `aspen-crm` 0.1.0, under the same `@0.1.0` labels (`wasm-tools component wit` on the built `.wasm` shows the crate's copy without it). Calling `context.services()` imports every service, so any trigger that uses one is refused; one that never calls it saves (*observed on a live instance*). No instance setting changes it, and no matching crate exists (`server-code` step 0) | Ship the rest now: `cd rust && cargo clean`, so `save-package` leaves the component out and the instance keeps its current server code, then deploy. Tell the human once that the trigger waits on an `aspen-crm` built from 26.4.1 being published under a new version |
 | "Operation Save is not allowed" on `save-package` | A previous package is still in flight | `aspen status`, then `build-and-deploy` step 4 — with go-ahead |
 | `save-package` warns to "run `aspen compile --rust`/`--typescript` first" | That code wasn't built, so it was left out | Compile, then save again |
 | Rust: componentization error naming wit-bindgen, "invalid leading byte" | The `rust/rust-toolchain.toml` pin is missing or changed | Restore it (`server-code`'s `rust-trigger-notes.md`) |
