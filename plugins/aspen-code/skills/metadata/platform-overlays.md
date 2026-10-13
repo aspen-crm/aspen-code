@@ -1,32 +1,22 @@
-# Platform overlays: what refuses, what is locked
+# Platform overlays: when one is refused
 
-Read before planning an overlay of a platform (`_p`) component, and when a record write fails
-"Field '<x>_p' is not allowed for object type". Checked against 26.4.1. The compiler enforces
-`extensibility` and `locks` from this directory's `metadata/platform/`, which differ between
-instances, so read the file there, then test a plan with a minimal overlay and
-`aspen compile --metadata` before building on it.
+Read when `aspen compile --metadata` or a check-in refuses an overlay of a platform (`_p`)
+component, and when a record write fails "Field '<x>_p' is not allowed for object type". Plan as
+if an overlay works, new fields included: what is locked differs between instances, and the
+compile and the check-in are the only way to know. Checked against 26.4.1.
 
-## What refuses an overlay
+## What a refusal means
 
-- `"extensibility": "locked"` refuses any overlay, even a label: `user_p`, `file_p`,
-  `security_policy_p`, `contact_channel_p`, `contact_rel_p`, `contact_merge_p`, `join_request_p`,
-  the `miner_*_p` objects.
-- `"limited"` (`activity_p`, `email_p`, `meeting_p`) refuses custom object types; `email_p` and
-  `meeting_p` also lock `fields`, so no new fields.
-- A platform field cannot be retired: its `active` is locked.
-- A `_c` layout for a platform object is refused ("reserved for the platform"): extend the platform
-  layout instead. A layout for your own object type on a platform object is fine.
-- A platform object type takes new `fields` entries only when its file in
-  `metadata/platform/object_p/object_type_p/` has `{"locator": "fields", "state": "unlocked"}`.
-  Without it, `fields` is locked even when the file has no `locks` at all: a label-only overlay
-  compiles, and a `fields` overlay fails "attribute '<type>.fields' is locked and cannot be
-  extended". This depends on the instance, not the object: on one 26.4.1 instance only
-  `account_p.account_p` unlocked `fields`, on another every platform type but `user_p`'s. Where
-  it is locked, a new field needs a custom object type on that object that lists it, and records
-  of that type.
-- Most platform picklists and `aspen_crm_p` take new `_c` entries. Their platform entries are
-  locked, except a picklist item's `label`, `description` and usually `active`, plus
-  `parent-objects` on most object-dependent picklists: widen those rather than forcing data to fit.
+- "attribute '<x>.fields' is locked and cannot be extended" on a platform object type: it takes
+  no new fields on this instance. List the field on a custom object type on that object instead,
+  and give the records that type. Refused on the platform object itself: put the field on a
+  custom object (`lean-data-model`).
+- Any other "is locked" on a platform entry: that entry can't change. A platform field cannot be
+  retired (its `active`); a platform picklist item takes a new `label`, `description`, usually
+  `active`, and on most object-dependent picklists `parent-objects`: widen those rather than
+  forcing data to fit. Add `_c` entries beside the platform ones.
+- "reserved for the platform" on a `_c` layout for a platform object: extend the platform layout
+  instead. A layout for your own object type on a platform object is fine.
 
 ## `_p` fields an object type doesn't get
 
