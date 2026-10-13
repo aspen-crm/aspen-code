@@ -93,7 +93,7 @@ and `platform/`, then the docs, then a skill.
 
 Verified against x-platform **26.4.1** ([`xplatform.json`](../../xplatform.json)): the `aspen`
 CLI 26.4.1, App API v24.3, Rust 1.98.1 to `wasm32-wasip2`. *Observed on a live instance* marks a
-fact not checkable in source. When the instance serves another release (the session-start note
+fact seen on a run rather than in the release. When the instance serves another release (the session-start note
 says so), `--help`, `aspen doctor` and the installed SDK win over any skill.
 
 ### Where the docs are wrong for CLI 26.4.1

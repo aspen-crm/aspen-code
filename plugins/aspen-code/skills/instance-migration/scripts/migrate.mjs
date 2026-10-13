@@ -408,16 +408,16 @@ function pointer (e, v, objs, resolve, targetOf) {
 
 const raw = (e, row) => 'value' in e ? e.value : e.expr ? evaluate(e.expr, row) : row[e.from] ?? null
 
-// Rules the CRM triggers enforce on write that the describe does not declare (x-platform
-// teams/crm at the pinned release). The dry run checks them; sfmigrate draft proposes the fix.
+// Rules the CRM triggers enforce on write that the describe does not declare, at the pinned
+// release. The dry run checks them; sfmigrate draft proposes the fix.
 export const TARGET_RULES = {
   contact_p: {
-    // common/src/validation.rs phone_numbers_distinct and work_personal_email_distinct: each pair
-    // must differ when both are set. The trigger scopes the error to the second field.
+    // Phone numbers, and the work and personal emails: each pair must differ when both are set.
+    // The trigger scopes the error to the second field.
     distinct: [['mobile_phone_p', 'office_phone_p'], ['mobile_phone_p', 'home_phone_p'], ['office_phone_p', 'home_phone_p'], ['work_email_p', 'personal_email_p']],
-    // common/src/channel.rs normalize_linkedin_url: anything it cannot correct is refused.
+    // LinkedIn URLs are normalized on write; anything the platform cannot correct is refused.
     normalize: { linkedin_profile_p: 'linkedin' },
-    // triggers/src/contact/derive.rs apply_default_owner_to_insert: a new contact's owner is the caller.
+    // A new contact's owner is the caller.
     setOnInsert: { owner_p: 'Aspen makes the person loading a contact its owner, whatever the row says; reassigning it is a separate update' }
   }
 }

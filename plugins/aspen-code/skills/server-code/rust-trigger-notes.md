@@ -4,8 +4,8 @@ Read this only when you're actually authoring a Rust trigger, and after `trigger
 beside it. That file is six handlers that build unchanged against the crate `aspen init`
 scaffolds, and copying the nearest one is faster than learning the rules first. This file is the
 rules those patterns obey, for when none of them is your case. The `aspen_crm` crate's own
-docs.rs coverage is thin. Facts below are checked against the SDK and 26.4.1 platform source
-unless marked *observed on a live instance*.
+docs.rs coverage is thin. Facts below are checked against the SDK and 26.4.1 unless marked
+*observed on a live instance*.
 
 ## One crate, at `rust/`, and the CLI names the codefile
 

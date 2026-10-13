@@ -2,8 +2,7 @@
 
 Read this before asking the developer how a trigger should fail (`SKILL.md` step 1), and when
 writing the rejection code. What each mechanism does to the batch, and the error type, subtype,
-detail and field context the Data API returns, are checked against the 26.4.1 platform source and
-its record-trigger tests. The HTTP status, `display_detail` and the record form column were traced
+detail and field context the Data API returns, are checked against 26.4.1. The HTTP status, `display_detail` and the record form column were traced
 earlier and not re-checked for this release. The *Record Triggers* docs page covers the SDK calls;
 it does not cover what reaches the caller.
 

@@ -145,7 +145,7 @@ export function missingDependencies (dir, env = process.env, home = homedir()) {
   return missing
 }
 
-// The name the CLI knows an instance by (`local_name` in its project/location.rs): the
+// The name the CLI knows an instance by: the
 // domain/instance its URL path names, or its host when the path is empty. A vanity host and the
 // canonical one are the same instance to it.
 const localName = (url) => {
