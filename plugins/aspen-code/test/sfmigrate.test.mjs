@@ -14,7 +14,7 @@ const URL = 'https://acme.example.com/acme.com/dev/'
 const sfField = (label, type, o = {}) => ({
   label, type: o.aspen ?? 'text', subtype: 'text', required: false, unique: false,
   lookup: o.to?.length === 1 ? o.to[0] : null, objects: o.to?.length > 1 ? o.to : null, picklist: o.picklist ?? null,
-  sf: { type, length: null, precision: null, scale: null, calculated: false, formula: null, createable: true, externalId: false, referenceTo: o.to ?? [], relationshipName: null }
+  sf: { type, length: o.length ?? null, precision: null, scale: null, calculated: false, formula: null, createable: true, externalId: false, referenceTo: o.to ?? [], relationshipName: null }
 })
 const ref = (label, ...to) => sfField(label, 'reference', { to, aspen: 'id' })
 const str = (label) => sfField(label, 'string')
@@ -23,9 +23,14 @@ const sfObject = (label, fields) => ({ label, custom: false, fields })
 
 const SOURCE = {
   objects: {
-    Account: sfObject('Account', { Name: str('Account Name'), BillingCity: str('Billing City'), OwnerId: ref('Owner ID', 'User') }),
+    Account: sfObject('Account', { Name: str('Account Name'), BillingCity: str('Billing City'), OwnerId: ref('Owner ID', 'User'), Website: sfField('Website', 'url', { length: 255 }) }),
     Contact: sfObject('Contact', { LastName: str('Last Name'), Email: sfField('Email', 'email'), Phone: sfField('Business Phone', 'phone'), AccountId: ref('Account ID', 'Account') }),
-    Opportunity: sfObject('Opportunity', { Name: str('Name'), AccountId: ref('Account ID', 'Account'), OwnerId: ref('Owner ID', 'User') }),
+    Opportunity: sfObject('Opportunity', {
+      Name: str('Name'), AccountId: ref('Account ID', 'Account'), OwnerId: ref('Owner ID', 'User'),
+      Amount: sfField('Amount', 'currency', { aspen: 'currency' }), Probability: sfField('Probability (%)', 'percent', { aspen: 'number' }),
+      CurrencyIsoCode: pick('Opportunity Currency', 'Opportunity.CurrencyIsoCode')
+    }),
+    User: sfObject('User', { Email: sfField('Email', 'email'), LastName: str('Last Name') }),
     Case: sfObject('Case', { Subject: str('Subject') }),
     Lead: sfObject('Lead', { Email: sfField('Email', 'email') }),
     Product2: sfObject('Product', { Name: str('Product Name'), ProductCode: str('Product Code') }),
@@ -47,8 +52,9 @@ const SOURCE = {
     'AccountContactRelation.Roles': ['Champion'],
     'OpportunityContactRole.Role': ['Decision Maker'],
     'CaseContactRole.Role': ['Technical Contact'],
-    'AccountTeamMember.TeamMemberRole': ['Account Manager'],
-    'OpportunityTeamMember.TeamMemberRole': ['Sales Rep']
+    'AccountTeamMember.TeamMemberRole': ['Account Manager', 'Sales Rep'],
+    'OpportunityTeamMember.TeamMemberRole': ['Account Manager', 'Sales Rep'],
+    'Opportunity.CurrencyIsoCode': ['USD', 'EUR', 'XAU']
   }
 }
 
@@ -57,7 +63,8 @@ const SOURCE = {
 
 const field = (label, type, subtype, o = {}) => ({
   label, description: o.description ?? null, type, subtype, required: !!o.required, unique: !!o.unique, readOnly: false,
-  lookup: o.lookup ?? null, objects: o.objects ?? null, relatedObjectField: o.on ?? null, picklist: o.picklist ?? null
+  lookup: o.lookup ?? null, objects: o.objects ?? null, relatedObjectField: o.on ?? null, picklist: o.picklist ?? null,
+  maxLength: o.maxLength ?? null, minValue: o.minValue ?? null, maxValue: o.maxValue ?? null, dependsOn: o.dependsOn ?? null
 })
 const text = (label, o) => field(label, 'text', 'text', o)
 const id = (label, to, o = {}) => field(label, 'id', 'lookup', { ...o, lookup: to })
@@ -70,7 +77,7 @@ const TARGET = {
   objects: {
     user_p: object('User', { email_p: text('Email', { unique: true }) }),
     team_p: object('Team', { email_p: text('Email', { unique: true }), user_p: id('User', 'user_p', { unique: true }) }, { description: 'An employee, contractor, or partner of the company.' }),
-    account_p: object('Account', { name_p: text('Name', { required: true }), owner_p: id('Owner', 'team_p') },
+    account_p: object('Account', { name_p: text('Name', { required: true }), owner_p: id('Owner', 'team_p'), website_p: field('Website', 'text', 'url', { maxLength: 120 }) },
       { included: WHATS('task_p', 'meeting_p', 'contact_role_p', 'team_role_p') }),
     account_address_p: object('Account Address', { account_p: id('Account', 'account_p'), city_p: text('City') }, { description: 'Physical location or postal address associated with an account.' }),
     contact_p: object('Contact', { last_name_p: text('Last Name'), work_email_p: text('Work Email', { description: 'Primary and active work email address.' }), office_phone_p: text('Office Phone'), primary_account_p: id('Primary Account', 'account_p') }),
@@ -78,8 +85,11 @@ const TARGET = {
     opportunity_p: object('Opportunity', {
       name_p: text('Name', { required: true }),
       customer_p: poly('Customer', 'customeron_p', { objects: ['account_p', 'contact_p'] }), customeron_p: objectRef('Customer (Object)'),
-      owner_p: poly('Owner', 'owneron_p', { objects: ['user_p'] }), owneron_p: objectRef('Owner (Object)')
+      owner_p: poly('Owner', 'owneron_p', { objects: ['user_p'] }), owneron_p: objectRef('Owner (Object)'),
+      amount_p: field('Amount', 'currency', 'currency'), ccode_p: id('Currency', 'currency_p'),
+      probability_p: field('Probability', 'number', 'percentage', { minValue: '0.00', maxValue: '1.00' })
     }, { included: WHATS('task_p', 'meeting_p', 'contact_role_p', 'team_role_p') }),
+    currency_p: object('Currency', { name_p: text('Name', { required: true }), currency_code_p: field('Currency Code', 'picklist', 'picklist', { picklist: 'currency_code_p', unique: true }) }),
     case_p: object('Case', { subject_p: text('Subject') }, { included: WHATS('task_p', 'meeting_p', 'contact_role_p', 'team_role_p') }),
     lead_p: object('Lead', { email_p: text('Email') }),
     product_p: object('Product', { name_p: text('Name'), sku_p: text('SKU', { unique: true }) }),
@@ -95,7 +105,7 @@ const TARGET = {
     team_role_p: object('Team Role', {
       team_p: id('Team', 'team_p', { required: true }),
       what_p: poly('What', 'whaton_p', { required: true }), whaton_p: objectRef('What (Object)', { required: true }),
-      role_p: field('Role', 'picklist', 'picklist', { picklist: 'team_role_p.role_p' }),
+      role_p: field('Role', 'picklist', 'picklist', { picklist: 'team_role_p', dependsOn: 'whaton_p' }),
       team_role_chk_p: text('Uniqueness Key', { unique: true })
     }),
     task_p: object('Task', {
@@ -112,10 +122,16 @@ const TARGET = {
       parent_p: id('Parent', 'meeting_p')
     })
   },
-  picklists: { 'contact_role_p.role_p': ['decision_maker_p', 'champion_p'], 'team_role_p.role_p': ['account_manager_p'] }
+  picklistItems: {
+    'contact_role_p.role_p': [{ name: 'decision_maker_p', label: 'Decision Maker' }, { name: 'champion_p', label: 'Champion' }],
+    // Object-dependent: each item names the objects whose records it may be used on.
+    team_role_p: [{ name: 'account_manager_p', label: 'Account Manager', parentObjects: ['account_p'] }, { name: 'sales_rep_p', label: 'Sales Rep', parentObjects: ['opportunity_p'] }],
+    currency_code_p: [{ name: 'usd_p', label: 'USD' }, { name: 'eur_p', label: 'EUR' }]
+  }
 }
+TARGET.picklists = Object.fromEntries(Object.entries(TARGET.picklistItems).map(([n, items]) => [n, items.map((i) => i.name)]))
 
-function draft (t, objects) {
+function draft (t, objects, source = SOURCE) {
   const root = mkdtempSync(join(tmpdir(), 'sfmigrate '))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   mkdirSync(join(root, '.aspen'))
@@ -123,7 +139,7 @@ function draft (t, objects) {
   const ws = join(root, 'data', 'migrations', 'acme')
   mkdirSync(join(ws, 'schema'), { recursive: true })
   writeFileSync(join(ws, 'mapping.json'), JSON.stringify({ source: { kind: 'salesforce', org: 'acme' }, target: { url: URL }, objects: [] }))
-  writeFileSync(join(ws, 'schema', 'source.json'), JSON.stringify(SOURCE))
+  writeFileSync(join(ws, 'schema', 'source.json'), JSON.stringify(source))
   writeFileSync(join(ws, 'schema', 'target.json'), JSON.stringify(TARGET))
   const r = spawnSync(process.execPath, [script, 'draft', ws, '--objects', objects], { cwd: root, encoding: 'utf8' })
   assert.equal(r.status, 0, r.stderr)
@@ -149,9 +165,11 @@ test('contact roles go to contact_role_p, never contact_rel_p, keyed on the pair
     assert.equal(to(o, 'contact_p').lookup, 'Contact', source)
     assert.deepEqual(o.key, { field: 'contact_role_chk_p', of: ['contact_p', 'what_p'] }, source)
   }
-  // Roles is proposed for role_p; a multi-select is a decision, a single picklist a value map.
+  // Roles is proposed for role_p; a multi-select is a decision, a single picklist a value map,
+  // matched to the target's items by label.
   assert.match(to(entry('AccountContactRelation'), 'role_p').todo, /multi/i)
-  assert.match(to(entry('OpportunityContactRole'), 'role_p').todo, /Decision Maker/)
+  assert.deepEqual(to(entry('OpportunityContactRole'), 'role_p').map, { 'Decision Maker': 'decision_maker_p' })
+  assert.equal(to(entry('OpportunityContactRole'), 'role_p').todo, undefined)
   // The direct relations are the pairs Aspen already derived from each contact's primary account.
   assert.equal(entry('AccountContactRelation').where, 'IsDirect = false')
   assert.equal(entry('OpportunityContactRole').where, undefined)
@@ -178,8 +196,42 @@ test('team members go to team_role_p: the user matched to a team member by email
     assert.deepEqual(to(o, 'what_p'), { target: 'what_p', from: parent, lookup }, source)
     assert.deepEqual(to(o, 'whaton_p'), { target: 'whaton_p', objectOf: 'what_p' }, source)
     assert.deepEqual(o.key, { field: 'team_role_chk_p', of: ['team_p', 'what_p'] }, source)
-    assert.match(to(o, 'role_p').todo, /Account Manager|Sales Rep/, source)
   }
+  // team_role_p is object-dependent: each junction maps only the roles its parent object allows.
+  const atm = to(entry('AccountTeamMember'), 'role_p')
+  assert.deepEqual(atm.map, { 'Account Manager': 'account_manager_p' })
+  assert.match(atm.todo, /team_role_p allows on account_p: Sales Rep\b.*\(account_manager_p\)/)
+  const otm = to(entry('OpportunityTeamMember'), 'role_p')
+  assert.deepEqual(otm.map, { 'Sales Rep': 'sales_rep_p' })
+  assert.match(otm.todo, /team_role_p allows on opportunity_p: Account Manager\b.*\(sales_rep_p\)/)
+})
+
+test('a Salesforce User is a team member, not a platform login', t => {
+  const { entry } = draft(t, 'User')
+  assert.equal(entry('User').target, 'team_p')
+})
+
+test('lengths, ranges and the record currency come from the target describe', t => {
+  const { entry } = draft(t, CORE)
+  const opp = entry('Opportunity')
+  // probability_p takes 0.00-1.00; Salesforce holds 50% as 50.
+  assert.deepEqual(to(opp, 'probability_p'), { target: 'probability_p', expr: 'r.Probability == null ? null : Number(r.Probability) / 100' })
+  // A currency value needs ccode_p: CurrencyIsoCode matched to currency_p by its code's label.
+  const cc = to(opp, 'ccode_p')
+  assert.deepEqual(cc.lookup, { object: 'currency_p', match: 'currency_code_p', by: 'value' })
+  assert.deepEqual(cc.map, { USD: 'usd_p', EUR: 'eur_p' })
+  assert.match(cc.todo, /XAU/)
+  assert.ok(!opp.fields.some((e) => e.from === 'CurrencyIsoCode' && e.drop), 'CurrencyIsoCode is mapped, not also dropped')
+  // website_p caps at 120 by the describe; Salesforce allows 255.
+  const gaps = entry('Account').report.find((r) => r.source === 'Website')
+  assert.equal(gaps.gap, 'may not fit')
+})
+
+test('without CurrencyIsoCode, the record currency is a todo, not a silent rejection', t => {
+  const src = structuredClone(SOURCE)
+  delete src.objects.Opportunity.fields.CurrencyIsoCode
+  const { entry } = draft(t, CORE, src)
+  assert.match(to(entry('Opportunity'), 'ccode_p').todo, /org's currency/)
 })
 
 test("an opportunity's account is its customer, and its owner a user, each with the object beside it", t => {

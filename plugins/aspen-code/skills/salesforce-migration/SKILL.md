@@ -36,14 +36,20 @@ From the target instance directory, with `aspen doctor` clean. `W` is `data/migr
 | 7 | `sfmigrate extract W` | Salesforce | `extract/` |
 | 8 | `migrate load W` (dry run; repeat until 0 failed) | Aspen | `reports/plan.md` only |
 | 9 | `migrate load W --run --limit 20` (pilot), after the user's yes | Aspen | target records |
-| 10 | `migrate load W --run`, after the user checked the pilot and said yes | Aspen | target records |
-| 11 | `migrate verify W` | Aspen | `reports/verify.md` |
+| 10 | `migrate load W --run --then verify`, after the user checked the pilot and said yes | Aspen | target records, `reports/verify.md` |
 
+- Each `migrate` command signs in to Aspen in the browser; steps chained with `--then` share one
+  sign-in (`migrate describe W --side target --then load` after a target change).
 - Steps 2 and 3 both write into `schema/`; draft needs both. Step 4 is optional but do it: it is
   what turns 464 Salesforce fields into the handful that hold data.
 - `sfmigrate gaps W` re-reports after the user changes the mapping, and exits 1 while a todo is left.
 - Load order, id remapping, resume and the second pass for self-lookups are `migrate.mjs`'s job
   and are unchanged. A load is safe to run again.
+- Draft and the dry run read the target's rules from `schema/target.json`: lengths, number
+  ranges, object-dependent picklists, phone (E.164) and URL (http/https) formats. A target
+  described before this release lacks them; `draft` stops and asks for `migrate describe` again.
+  Triggers and validation rules are invisible to both: a clean dry run is not a clean load, and
+  the pilot is where those show.
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →
   `build-and-deploy`, then `migrate describe W --side target` and `sfmigrate draft W` again.
 - Done when verify reports 0 failed, 0 differences and 0 not loaded, and the user has looked at
@@ -73,8 +79,10 @@ deleted yet. Only a field that **matched a target field and still does not fit**
 | A field nothing on the target matches | Dropped, and listed in the report under **holds data** or **empty in the sample**. |
 | A formula or roll-up field | A gap: Aspen has no computed-field type. Its value can be extracted as data, or the rule moves to a Rust trigger (`server-code`). |
 | A multi-select picklist | A gap: Aspen picklists hold one value. |
-| `RecordTypeId`, `CurrencyIsoCode`, `IsPersonAccount` | Named as a modelling decision rather than a field match. |
-| Picklist values missing on the target | A todo, with the values that do exist already in `map`. |
+| `RecordTypeId`, `IsPersonAccount` | Named as a modelling decision rather than a field match. |
+| A currency field (`Amount`) | Its record currency too: `ccode_p`, matched from `CurrencyIsoCode` to the `currency_p` whose code is labelled with it (`"by": "value"`). Without `CurrencyIsoCode`, a todo for the org's currency. The dry run fails a row with an amount and no `ccode_p`, and names a code the target has no `currency_p` for. |
+| A percent field onto a target that takes 0 to 1 (`maxValue` 1) | Divided by 100 (`expr`). |
+| Picklist values missing on the target | A todo, with the values that match a target item by name or label already in `map`; for an object-dependent picklist, only the items the parent object allows. |
 | A required target field nothing maps to | A todo: ask which constant or field fills it. |
 
 ## What to tell the user
@@ -105,5 +113,7 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 | "The formula field is computed, so it's not my problem" | Its value is real data. Extract the value, or move the rule to a trigger — but say which. |
 | "I'll upsert on the Salesforce Id" | There is no upsert, and `id_p` cannot be set. The id map makes a re-run safe. |
 | "I'll skip the pilot" | Undoing a bad full load means deleting every record it wrote. The pilot finds the problem on 20. |
+| "The dry run is clean, so the load will be" | It checks what the describe declares. Triggers and validation rules answer only on a real write: that is the pilot. |
+| "Owners match by email, so load team members in a later run" | Not needed: a match lookup sees records the same run inserted, and the object that loads them goes first. |
 | "The pilot will show whether the target accepts it" | The pilot writes real records on the target. It is not a test: settle the value with the user first. |
 | "Record types will map themselves" | They are a modelling decision. Ask before mapping anything that depends on one. |
