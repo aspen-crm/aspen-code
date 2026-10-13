@@ -34,7 +34,8 @@ that looks fine and changed nothing.
 - **Config vars:** if `./config_vars.json` exists, `save-package` uploads it after the save, and
   the upload clears every var the file doesn't list. Confirm it is complete, or shouldn't be there.
 - **Ask the human**, naming the instance (`.aspen/config.toml`), the components going out, and
-  whether code is included. It changes a shared instance, and what it creates can't be deleted yet.
+  whether code is included. It changes a shared instance, and the components it creates can't be
+  deleted yet.
 
 ## 3. The check-in chain — ordered, each phase mandatory
 

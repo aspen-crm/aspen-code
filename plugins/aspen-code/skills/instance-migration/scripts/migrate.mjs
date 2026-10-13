@@ -16,7 +16,7 @@
 //   node migrate.mjs signout <workspace> [--side source|target]   end the kept sign-ins
 //
 // The source is only read: its client has no write method. The target is written only by
-// `load --run`, and nothing is ever deleted. There is no upsert and `id_p` cannot be set on
+// `load --run`, and this script deletes nothing. There is no upsert and `id_p` cannot be set on
 // create, so every target record gets a new id; idmap/<object>.jsonl records source id → target
 // id after every batch, which makes a re-run skip what is already loaded. A lookup to its own object, or to an object that
 // loads later, is left blank on insert and filled by a second pass.

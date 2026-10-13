@@ -61,7 +61,8 @@ Read-only subagents: `schema-explorer` answers a model-shape question across man
 - Choose an object or field by its `description`, not its name: `contact_rel_p` is a team
   member's relationship strength with a contact; `contact_role_p` links a contact to a record.
   Read it in `metadata/platform/object_p/<name>.json` (or the describe); ask when none fits.
-- Metadata can't be deleted yet. Retire with `"active": false`; never delete a deployed file.
+- Metadata can't be deleted yet (records can). Retire with `"active": false`; never delete a
+  deployed file.
 - Deploying and the recovery verbs change a shared instance: get the human's go-ahead
   (`build-and-deploy`). "Deployed" is done only after a record round-trip proves the behavior.
 - **Ask only at the gates above** (credentials, a deploy or recovery verb, installing, a new
