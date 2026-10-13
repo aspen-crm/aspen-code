@@ -103,8 +103,9 @@ if (asJson) {
     `\n${counted} finding(s) in ${results.length} file(s). ` +
     (unchecked < files
       ? 'Token names come from the installed SDK (`typescript/node_modules/@aspen-crm/sdk/dist/tokens/`). '
-      : 'The installed SDK ships no token snapshot: take names from the custom-ui skill\'s ' +
-        '`controls.md` or a native element, and keep the light value as the `var()` fallback. ') +
+      : 'The installed SDK ships no token snapshot: pin the 0.2.0 SDK the instance\'s CDN serves ' +
+        '(custom-ui `SKILL.md`, "Before the first file"), or read names off a native element and ' +
+        'keep the light value as the `var()` fallback. ') +
     'For a value the system has no token for, add ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above, or ' +
     '`aspen-component-exempt: <reason>` anywhere in the file for a component or native-control finding.'

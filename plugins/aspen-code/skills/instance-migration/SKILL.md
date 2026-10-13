@@ -5,59 +5,54 @@ description: Use when moving records from one Aspen instance to another — migr
 
 # Instance migration
 
-Copy records from a **source** Aspen instance into the **target** instance whose directory you
-are in. `scripts/migrate.mjs` beside this file does the mechanics: describe, page, batch, remap
-ids, resume. You and the user decide the mapping. This skill never deletes: removing records it
-loaded is a separate step the user asks for (below).
+Copy records from a **source** Aspen instance into the **target** instance whose directory you are
+in. `scripts/migrate.mjs` beside this file does the mechanics (describe, page, batch, remap ids,
+resume); you and the user decide the mapping.
 
 ```sh
 M="<this skill's dir>/scripts/migrate.mjs"
 node "$M" --help
 ```
 
-The script uses the REST API; the CLI has no data commands. There is no upsert, and `id_p`
-cannot be set, so every target record gets a new id. The workspace's id map connects the two
-and makes a re-run skip what is already loaded.
+The script uses the REST API; the CLI has no data commands. There is no upsert and `id_p` can't be
+set, so every target record gets a new id; the workspace's id map connects the two and makes a
+re-run skip what already loaded. Don't add a legacy-id field for it.
+
+This skill never deletes. Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object
+whose describe says `deletable: true`), but only as a separate step the user asks for and approves.
+Don't add a delete command, and don't offer a delete as the fix for a bad load: fix the mapping
+and run again.
 
 When you call the API yourself, to explore or to check a failure the script reports:
 
-- **Describe is `POST /describe/object_p` with `{"data": [{"name": …, "object-type": …}]}`**;
-  every other body shape returns 422. The fields are not on the returned record: follow its
-  `variant-index` into `supplemental.variants[]`. Pass `object-type` to see the fields a write of
-  that type is checked against.
-- **Read `status` before `data`.** A failed request (a `SELECT` with no `LIMIT`, for example)
-  comes back as HTTP 200 with `status: FAILURE`, `failures`, and no `data`, so code that only
-  reads `data` sees no rows. A 500 has `failures` and no `data` too.
-- **A write returns the new record's id as `id`; a query returns the columns you selected**
-  (`id_p`).
-- **Items in a batch succeed or fail on their own.** The whole batch rolls back only when a
-  trigger errors or an insert breaks a unique constraint.
-- **Triggers create records too.** Aspen derives a `contact_role_p` from
-  `contact_p.primary_account_p` and `account_p.primary_contact_p`, from `opportunity_p.customer_p`
-  (the contact, or the account's primary contact), and from cases, with `role_p` blank; and a
-  `team_role_p` from the owner of an account, opportunity or case (key it the same way, on
-  `team_role_chk_p` over `team_p` and `what_p`). Inserting
-  the same pair again breaks `contact_role_chk_p`, which rolls back the batch. Don't reload those:
-  key the object on the pair, `"key": {"field": "contact_role_chk_p", "of": ["contact_p",
-  "what_p"]}`, and `load` matches the derived record instead (`onMatch: "update"` writes your
-  `role_p` onto it). A `*_chk_p` field holds its key as plain text (`<contact id>|<what id>`).
-
-Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object whose describe says
-`deletable: true`), but only as a separate step the user asks for and approves. The script has no
-delete command; don't add one, and don't offer a delete as the fix for a bad load.
+- **Describe is `POST /describe/object_p` with `{"data": [{"name": …, "object-type": …}]}`**; any
+  other body returns 422. The fields are not on the returned record: follow its `variant-index`
+  into `supplemental.variants[]`. Pass `object-type` to see the fields a write of that type is
+  checked against.
+- **Read `status` before `data`.** A failed request (a `SELECT` with no `LIMIT`) comes back HTTP
+  200 with `status: FAILURE`, `failures` and no `data`; a 500 has `failures` and no `data` too.
+- **A write returns the new id as `id`; a query returns the columns you selected** (`id_p`).
+- **Batch items succeed or fail on their own**; the batch rolls back only when a trigger errors or
+  an insert breaks a unique constraint.
+- **Triggers create records too.** Aspen derives a `contact_role_p` (with `role_p` blank) from
+  `contact_p.primary_account_p`, `account_p.primary_contact_p`, `opportunity_p.customer_p` (the
+  contact, or the account's primary contact) and cases, and a `team_role_p` from the owner of an
+  account, opportunity or case. Inserting the same pair again breaks `contact_role_chk_p` and rolls
+  back the batch, so key those objects on the pair — `"key": {"field": "contact_role_chk_p", "of":
+  ["contact_p", "what_p"]}`, and `team_role_chk_p` over `team_p` and `what_p` — and `load` matches
+  the derived record instead (`onMatch: "update"` writes your `role_p` onto it).
 
 ## Sign-in
 
-Each command that reaches an instance opens a browser tab, the user signs in, and the token
-lives only in the script's memory until the command ends. Nothing is stored; you never see a
-token. Steps chained with `--then` share one sign-in per instance: chain what runs back to back,
-such as `describe W --side target --then load` or `load W --run --then verify`. The chain stops
-at the first step that fails, and a dry run cannot chain into `load --run`: the user reads it
-first.
+Each command that reaches an instance opens a browser tab for the user to sign in; the token lives
+only in the script's memory until the command ends, and you never see it. Steps chained with
+`--then` share one sign-in per instance (`describe W --side target --then load`,
+`load W --run --then verify`). The chain stops at the first failing step, and a dry run can't chain
+into `load --run`: the user reads it first.
 
-- Run those commands in the background: each waits for the user.
+- Run these commands in the background; each waits for the user.
 - The machine must reach both instances (VPN), and the browser must run on this machine.
-- Never ask for an API key or a token. Don't run `aspen login` for a migration.
+- Never ask for an API key or token, and don't run `aspen login` for a migration.
 
 ## The flow
 
@@ -76,6 +71,8 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 | 8 | `load W --run --then verify`, after the user checked the pilot and said yes | target | target records, `reports/verify.md` |
 
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
+- The pilot writes real records and nothing here can undo a bad full load: never skip it, and
+  settle values with the user before it rather than testing them on it.
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →
   `build-and-deploy`, then `describe W --side target`.
 - A load is safe to run again. On a server error for a batch, run again with `--batch 50`.
@@ -85,16 +82,15 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 
 ## What to tell the user
 
-Each message has three parts, in order: what just happened (one line), what it means, and the one
-thing you need from them.
+Each message: what just happened (one line), what it means, and the one thing you need from them.
 
 | After | The message |
 |---|---|
-| A tab opened | "A tab is open for the source/target (`<instance>`). Sign in with an account that can read / create `<objects>`." If no tab opened, add the URL the script printed. |
+| A tab opened | Which instance it is for, and that the account must be able to read / create `<objects>`. The URL the script printed, if no tab opened. |
 | `describe` | Object counts on each side; which requested objects exist on both. |
-| `draft` | Per object, a table `Field \| Proposal \| Why`: one row per `todo`, one per reference picklist the draft mapped, and one for the key, each with a proposal from the defaults below. Then the fields that map as they are, on one line. End with: "Reply yes to take these, or tell me which rows to change." The first time, add what cannot move: created and modified dates and users, history, files, the activity feed. |
-| The dry run | To insert, matched, failed. For failures: a row per field and problem, its count, and the proposed fix. When it's clean: the pilot ask, naming the target, objects and row counts. |
-| A load | Inserted, failed, held back; the names of a few loaded records to check in the app; the next step (verify, or the full load). |
+| `draft` | Per object, a `Field \| Proposal \| Why` table: one row per `todo`, per reference picklist the draft mapped, and for the key, each with one proposal from the defaults below. Then the fields that map as they are, on one line. End: "Reply yes to take these, or tell me which rows to change." The first time, add what can't move: created and modified dates and users, history, files, the activity feed. |
+| The dry run | To insert, matched, failed; per failing field and problem, its count and the proposed fix. When clean: the pilot ask, naming the target, objects and row counts. |
+| A load | Inserted, failed, held back; a few loaded record names to check in the app; the next step. |
 | `verify` | Sampled, differences, not loaded; whether the migration is done. |
 
 A proposal is not a decision: change `mapping.json` only after the user answers.
@@ -103,23 +99,14 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 
 | Gap | Propose | Why |
 |---|---|---|
-| A platform field (`_p`) on one side only, such as `smb_p`, `smt_p`, `extid_p` | Drop | The instances run different platform versions. A `_p` field can't be created. |
+| A platform field (`_p`) on one side only, such as `smb_p`, `smt_p`, `extid_p` | Drop | The instances run different platform versions; a `_p` field can't be created. |
 | A custom field (`_c`) the target lacks | Drop, unless the user names a use | A new field can't be deleted yet: `lean-data-model` first. |
 | A lookup to users | Match by email, blank when there is no match: `"lookup": {"object": "user_p", "match": "email_p"}, "missing": "null"` | Migrating `user_p` creates users on the target. |
 | A lookup to another object not migrated | Drop, unless the user wants that object too | Migrating it brings its own decisions. |
 | A picklist value not on the target | The closest target value, in `map` | The user confirms each one. |
-| A reference picklist (`object_type_ref`, `security_profile_ref` in `schema/target.json`), such as `otype_p` | Drop. Map a value only when the user names the target value it becomes. | Neither the schema nor the dry run lists these values, and the instance refuses one it doesn't have. |
+| A reference picklist (`object_type_ref`, `security_profile_ref` in `schema/target.json`), such as `otype_p` | Drop; map a value only when the user names the target value | Neither the schema nor the dry run lists these values, and the instance refuses one it doesn't have. |
 | A required target field nothing maps to | A constant in `value` | Ask which. |
-| No key | A mapped field that is unique on the target, or none | It matters only for a second source, or a reload from a new workspace. |
-| `contact_role_p` | The composite key on `contact_role_chk_p` (above) | Triggers derive some of these pairs before the load reaches them. |
+| No key | A mapped field unique on the target, or none | It matters only for a second source, or a reload from a new workspace. |
+| `contact_role_p`, `team_role_p` | The composite key (above) | Triggers derive some of these pairs before the load reaches them. |
 
-## Red flags
-
-| Thought | Reality |
-|---|---|
-| "`contact_rel_p` sounds like the source's contact relationship" | Names mislead. Pick the target by the `description` in `schema/target.json`, or ask. |
-| "I'll list the options and let the user pick" | Propose one per row. They answer yes once, not twelve times. |
-| "I'll upsert on the legacy id" / "add `legacy_id_c` everywhere" | No upsert; the id map makes a re-run safe, and a field can't be deleted yet. |
-| "I'll skip the pilot" | This skill cannot undo a bad full load. |
-| "The pilot will show whether the target accepts it" | The pilot writes real records on the target. It is not a test: settle the value with the user first. |
-| "The load failed, so I'll clear the target and reload" | This skill never deletes. Fix the mapping and run again; the id map skips what loaded. |
+Pick the target object or field by the `description` in `schema/target.json`, not its name.

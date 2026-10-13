@@ -15,7 +15,7 @@ For a select, lookup or date control, build it from [controls.md](controls.md), 
 `<input>` that would stand in for one.
 For a new or changed control, inspect a native example in the running instance when available,
 including its open/edit state. Then pick its token family from `ui-component-tokens.md` and read that family's `.d.ts`
-(SDK 0.2.0; on 0.1.0 take the names from `controls.md` or a native element).
+(SDK 0.2.0; on 0.1.0, pin the CDN's 0.2.0 first — `SKILL.md`, "Before the first file").
 Keep a short implementation note of the counterpart and shared helper chosen; no new approval
 step or user-facing design document is required.
 
@@ -85,8 +85,8 @@ gap. Do not report "matches Aspen" based on token lint, a successful deploy, or 
   `@aspen-crm/sdk/tokens/*` (see [Typed token modules](#typed-token-modules)). Check `exports` in
   the installed SDK's `package.json` rather than assuming.
   - A directory `aspen init` scaffolded on 26.4.1 has SDK 0.1.0, which ships no token snapshot,
-    and the platform does not render its pages. Tell the human before building one, and never
-    change the pins (`SKILL.md`, "Before the first file").
+    and the platform does not render its pages. Pin the CDN's 0.2.0 first (`SKILL.md`, "Before
+    the first file").
 - **Those inspected SDK versions expose no component library to import.** Component token
   families (`--ap-comp-button-*`, etc.) are token namespaces, not component modules. Check the installed SDK's public
   exports once when starting UI work, and again after an SDK upgrade. Prefer supported platform
@@ -176,15 +176,11 @@ Rules that matter:
 - **SDK without a snapshot (0.1.0)?** If `node_modules/@aspen-crm/sdk/dist/manifest.json` has no
   `tokenStyleSheetFilePath`, there is no snapshot, no token modules, no `.d.ts` to read names
   from, and no build or hook check of names: a misspelled name passes silently. The host's tokens
-  do not inherit into the page, and the platform refuses to render it; tell the human before
-  building one (`SKILL.md`, "Before the first file"). If they still want the code written: for a
-  select, lookup, date field or button, copy the names in [controls.md](controls.md) — each one
-  is checked against the platform's own token list. For anything else, read names off a native
-  element in the running instance (computed styles in browser devtools), copy them exactly, and
-  keep the light-value fallback. x-cli 0.2.0 fails the build against such an SDK. Never raise the
-  pins yourself: `typescript/package.json` pins `@aspen-crm/sdk` and `@aspen-crm/x-cli` exactly,
-  `aspen doctor` expects the version this CLI scaffolds, and the instance directory's `AGENTS.md`
-  says to raise them together.
+  do not inherit into the page, and the platform refuses to render it. Pin the CDN's 0.2.0 first
+  (`SKILL.md`, "Before the first file"), raising `@aspen-crm/sdk` and `@aspen-crm/x-cli` together:
+  x-cli 0.2.0 fails the build against the 0.1.0 SDK. Until then, read names off a native element
+  in the running instance (computed styles in browser devtools), copy them exactly, and keep the
+  light-value fallback.
 - **Rebuilding an Aspen component? Take its tokens. Building something new? Compose from the
   semantic layer.** The semantic tokens are the design vocabulary and cover most of a page, so
   they are the right default for anything Aspen does not already publish — a magnitude bar in a
@@ -253,7 +249,7 @@ el.style.color = sem.color.textPrimary; // 'var(--ap-sem-color-text-primary)'
   touches; a group import keeps only the tokens used.
 - In a stylesheet, keep writing `var(--ap-…)`; the build check covers it.
 - Without a snapshot (SDK 0.1.0), write the `var(--ap-…, <light value>)` string in JS too, with a
-  name from `controls.md` or a native element.
+  name read off a native element.
 
 ---
 

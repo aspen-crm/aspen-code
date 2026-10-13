@@ -14,7 +14,8 @@ or `tab_p` behaves unlike its JSON suggests.
 - A `custom_page` tab's own name takes no dot (`budget_page_c`); an object tab's does
   (`<object>.<segment>`).
 - A tab opens on its `default-list-view`. Other active `list_view_p` on the same object and tab
-  appear only in the Saved Views panel (and at `?view=<list view name>`).
+  appear only in the Saved Views panel (and at `?view=<list view name>`), so make the default the
+  view people need daily.
 
 ## List views
 
