@@ -39,9 +39,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const isWindows = process.platform === 'win32'
 
 // Each environment serves its installer and toolchains from `static-assets.<app domain>`, the app
-// domain being the instance host's last two labels (x-platform's InstanceSettings.<env>.toml:
-// `cdn_url` beside `app_domain`). A launcher fetches only from the CDN it was installed from, so
-// the installer has to come from the instance's own environment.
+// domain being the instance host's last two labels. A launcher fetches only from the CDN it was
+// installed from, so the installer has to come from the instance's own environment.
 export function cdnUrl (instance) {
   try {
     const labels = new URL(instance).hostname.split('.')
