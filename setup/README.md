@@ -27,7 +27,8 @@ First work out two things:
 - **The OS:** macOS/Linux, or Windows (PowerShell).
 
 **Ask for the instance URL** unless the user already gave it: `https://<host>/<domain>/<instance>`,
-the instance's address in the browser up to the instance name. Ask once, early — sign-in needs it.
+the instance's address in the browser up to the instance name. Ask once, early — the CLI download
+(step 4) and sign-in both need it.
 
 ### 1. Choose where the plugin comes from
 
@@ -69,6 +70,9 @@ network or proxy trouble. Say so and stop.
 Remove only `aspen-code@aspen`. Leave the `aspen` marketplace and its other plugins alone:
 removing a marketplace uninstalls everything from it.
 
+Not installed? Move on without mentioning this step — don't tell the user there's nothing to
+remove.
+
 ### 3. Install the plugin
 
 | Host | Commands |
@@ -98,28 +102,44 @@ Restart Claude Code or Codex afterwards.
 
 ### 4. Install or update the Aspen CLI
 
+**The CLI comes from the instance's environment.** Each environment has its own download host,
+`<cdn>` = `https://static-assets.<app domain>`, where the app domain is the last two labels of the
+instance URL's host:
+
+| Instance URL | `<cdn>` |
+|---|---|
+| `https://0000-01-0101-ip.veevaxdev.com/acme.com/dev` | `https://static-assets.veevaxdev.com` |
+| `https://acme.aspen-crm2.com/acme.com/prod` | `https://static-assets.aspen-crm2.com` |
+
+The CLI only fetches toolchains from the host it was installed from, so a copy installed from
+another environment can't serve this instance. If the host doesn't end in an Aspen domain (a
+custom domain), ask the user which `static-assets.` host their environment uses.
+
 Is it installed? Check with `aspen --version`, or by its full path `~/.aspen/bin/aspen --version`
 (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
 
-**Installed:** update it. It prints "already the promoted release" when there's nothing to do.
+**Installed:** check where it came from: `~/.aspen/bin/aspenup show` prints a `cdn:` line.
+- It is `<cdn>`: update it. It prints "already the promoted release" when there's nothing to do.
 
-```sh
-~/.aspen/bin/aspenup self update
-```
+  ```sh
+  ~/.aspen/bin/aspenup self update
+  ```
+- It names another host: it was installed from a different environment. Tell the user, and with
+  their go-ahead re-run the installer below from `<cdn>`, which re-points it.
 
-**Not installed:** tell the user it downloads from `static-assets.veevaxdev.com` and installs to
-`~/.aspen`. It leaves their shell profile alone. Then, with their go-ahead:
+**Not installed:** tell the user it downloads from `<cdn>` (filled in) and installs to `~/.aspen`.
+It leaves their shell profile alone. Then, with their go-ahead, run it with `<cdn>` filled in:
 
 macOS / Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
+curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
+irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
 ```
 
 If the host refuses to run the installer, hand the user the command for their OS and ask them

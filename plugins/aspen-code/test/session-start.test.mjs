@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { context, pin } from '../hooks/session-start.mjs'
+import { cdnUrl, context, pin } from '../hooks/session-start.mjs'
 
 const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'session-start.mjs')
 
@@ -40,6 +40,20 @@ test('no CLI: routes to getting-started with the installer', t => {
   assert.match(out, /getting-started/)
   assert.match(out, /installer\.(sh|ps1)/)
   assert.match(out, /--no-modify-path|-NoModifyPath/) // the user edits their own profile
+})
+
+test('no CLI: the installer comes from the instance\'s environment', t => {
+  assert.match(context(machine(t)), /static-assets\.<app domain>/)
+  const out = context(machine(t, { instanceDir: 'https://0000-01-0101-ip.aspen-crm2.com/acme.com/dev' }))
+  assert.ok(out.includes('https://static-assets.aspen-crm2.com/tooling/latest/cli/installer.'))
+  assert.doesNotMatch(out, /veevaxdev/)
+})
+
+test('cdnUrl: static-assets on the instance host\'s app domain', () => {
+  assert.equal(cdnUrl('https://0000-01-0101-ip.veevaxdev.com/acme.com/dev'), 'https://static-assets.veevaxdev.com')
+  assert.equal(cdnUrl('https://login.veeva2030.com/acme.com/prod/'), 'https://static-assets.veeva2030.com')
+  assert.equal(cdnUrl('not a url'), null)
+  assert.equal(cdnUrl(undefined), null)
 })
 
 test('CLI in ~/.aspen/bin but not on PATH: says to use the full path', t => {

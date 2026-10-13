@@ -26,19 +26,28 @@ before and after), then go to step 2.
 Not installed:
 
 The CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and later fetches the
-toolchain each instance serves. Tell the user what it does (downloads from
-`static-assets.veevaxdev.com`, installs to `~/.aspen`) and **ask before running it**.
+toolchain each instance serves — always from the environment it was installed from. So install it
+from **the instance's environment**: `<cdn>` = `https://static-assets.<app domain>`, the app domain
+being the last two labels of the instance URL's host (`https://abc.aspen-crm2.com/acme.com/dev` →
+`https://static-assets.aspen-crm2.com`). Ask for the instance URL first if you don't have it; for a
+custom-domain host, ask the user for their environment's `static-assets.` host.
+
+An existing install from another environment can't serve this instance: `aspenup show` prints its
+`cdn:`. If that isn't `<cdn>`, tell the user and, with consent, re-run the installer below.
+
+Tell the user what it does (downloads from `<cdn>`, filled in; installs to `~/.aspen`) and **ask
+before running it**, with `<cdn>` filled in:
 
 macOS / Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
+curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
+irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
 ```
 
 `-y` skips the installer's own confirmation, which cannot be answered from your shell — the user's

@@ -25,9 +25,11 @@ document it follows; a person can work it too.
 1. **Gets the machine ready.** A session-start check (offline, silent when there is nothing to say)
    notices when the CLI is missing, not signed in, or signed in to a different instance than the
    directory, and prompts the model to walk the user through it.
-2. **Installs the CLI** — with the user's consent:
-   - macOS/Linux: `curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh`
-   - Windows: `irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 | iex`
+2. **Installs the CLI** — with the user's consent, from the instance's own environment,
+   `<cdn>` = `https://static-assets.<app domain>` (e.g. an instance on `*.aspen-crm2.com` →
+   `https://static-assets.aspen-crm2.com`):
+   - macOS/Linux: `curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh`
+   - Windows: `irm <cdn>/tooling/latest/cli/installer.ps1 | iex`
 3. **Signs in with OAuth.** `aspen login -i <instance URL>` opens a browser. The CLI refuses to do
    this under an agent, so the model hands the command to the user to run in their own terminal —
    it never sees or asks for a credential.
