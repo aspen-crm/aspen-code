@@ -11,9 +11,11 @@
 //      directory sits in; a `cd` into, or `--dir` at, another instance folder is a different
 //      instance's work, even when the login happens to match it.
 //   3. A folder that does not match the login. The CLI refuses too, but this names the fix:
-//      the user signs in again (the model never runs `aspen login`).
+//      sign in again, in the shape `getting-started` step 2 gives.
+//   4. `aspen login` in any other shape. With an API key it hands the model a secret; without the
+//      overrides the CLI refuses OAuth under an agent and suggests that API key.
 //
-// 1 and 3 are refused outright. 2 (and `aspen logout`) asks: Claude Code prompts; Codex, whose
+// 1, 3 and 4 are refused outright. 2 (and `aspen logout`) asks: Claude Code prompts; Codex, whose
 // hooks cannot prompt, refuses with a note to ask the user and re-run with ASPEN_CODE_CONFIRMED=1.
 //
 // Stateless, offline and read-only: it reads `.aspen/config.toml` files and the `instance` field
@@ -24,7 +26,7 @@ import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { credentialsPath, instanceDir, loggedInInstance, sameInstance as same } from './session-start.mjs'
+import { credentialsPath, instanceDir, loggedInInstance, loginCommand, sameInstance as same } from './session-start.mjs'
 
 const real = (p) => { try { return realpathSync(p) } catch { return resolve(p) } }
 const HELP = new Set(['--help', '-h', 'help', '--version', '-V'])
@@ -85,10 +87,17 @@ export function invocations (command, cwd, home = homedir()) {
       const value = args[d].includes('=') ? args[d].split('=').slice(1).join('=') : args[d + 1]
       if (value) dir = at(here, value, home)
     }
-    found.push({ binary: head, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed })
+    found.push({ binary: head, command: positional[0] ?? '', sub: positional[1] ?? '', dir, confirmed, args })
   }
   return found
 }
+
+// `aspen login` in the shape the CLI runs OAuth in under an agent: `--agent no`, and
+// ASPEN_INTERACTIVE set to 1/true — in front of the command, by `export` or `$env:`, or already in
+// the environment.
+const agentLogin = (args, command, env) =>
+  args.some((a, k) => a === '--agent=no' || (a === '--agent' && args[k + 1] === 'no')) &&
+  (/ASPEN_INTERACTIVE\s*=\s*['"]?(1|true)\b/i.test(command) || /^(1|true)$/i.test(String(env.ASPEN_INTERACTIVE ?? '').trim()))
 
 export function decide ({ command, cwd, env = process.env, home = homedir() }) {
   const session = instanceDir(cwd)
@@ -100,7 +109,12 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
     const verb = [inv.command, inv.command === 'move' ? inv.sub : ''].filter(Boolean).join(' ')
 
     if (inv.command === 'login') {
-      hard.push('`aspen login` is the user\'s to run, in their own terminal (OAuth in a browser; the CLI refuses it under an agent). Hand them the command — `getting-started` §2.')
+      const flag = (name) => inv.args.some((a) => a === name || a.startsWith(`${name}=`))
+      if (flag('-k') || flag('--api-key')) {
+        hard.push('This plugin never signs in with an API key. Sign in with OAuth in the browser — `getting-started` step 2.')
+      } else if (!agentLogin(inv.args, command, env)) {
+        hard.push(`Under an agent, \`aspen login\` refuses OAuth unless told the user is there to approve it in the browser. Run it as \`${loginCommand('<instance URL>')}\`, with a timeout of at least 6 minutes — \`getting-started\` step 2.`)
+      }
       continue
     }
     if (inv.command === 'logout' && !inv.confirmed) {
@@ -119,7 +133,7 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
 
     // 3. The folder names another instance than the login.
     if (bound && target?.instance && login && !same(target.instance, login)) {
-      hard.push(`\`${target.dir}\` belongs to \`${target.instance}\`, but the CLI is signed in to \`${login}\`, so \`aspen ${verb}\` would be refused or reach the wrong instance. Ask the user to sign in to this folder's instance in their own terminal: \`aspen login -i ${target.instance}\` (it replaces the current login).`)
+      hard.push(`\`${target.dir}\` belongs to \`${target.instance}\`, but the CLI is signed in to \`${login}\`, so \`aspen ${verb}\` would be refused or reach the wrong instance. Tell the user that signing in again replaces the current login, then sign in to this folder's instance: \`${loginCommand(target.instance)}\` (\`getting-started\` step 2).`)
       continue
     }
 

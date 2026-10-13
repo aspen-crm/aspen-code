@@ -30,9 +30,10 @@ document it follows; a person can work it too.
    `https://static-assets.aspen-crm2.com`):
    - macOS/Linux: `curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh`
    - Windows: `irm <cdn>/tooling/latest/cli/installer.ps1 | iex`
-3. **Signs in with OAuth.** `aspen login -i <instance URL>` opens a browser. The CLI refuses to do
-   this under an agent, so the model hands the command to the user to run in their own terminal —
-   it never sees or asks for a credential.
+3. **Signs in with OAuth.** The model runs `aspen login -i <instance URL>` with the CLI's own
+   overrides for a harness driving the browser hand-off (`--agent no`, `ASPEN_INTERACTIVE=1`). A
+   browser opens, the user approves, and the token goes to the OS keychain — the model never sees
+   or asks for a credential.
 4. **Creates the instance directory** with `aspen init`, then **installs what it needs to build**
    — `aspen init` installs nothing. A bundled script shows the plan, then installs the Rust
    toolchain the crate pins (with `wasm32-wasip2`), the crate's dependencies, and `typescript/`'s
@@ -82,7 +83,7 @@ controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 
-Not in 0.0.8: the remaining guard hooks.
+Not in 0.0.9: the remaining guard hooks.
 
 ## Install
 

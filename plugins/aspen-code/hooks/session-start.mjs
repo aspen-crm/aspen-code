@@ -49,6 +49,16 @@ export function cdnUrl (instance) {
   } catch { return null }
 }
 
+// `aspen login` refuses OAuth when an agent drives it unless told a person is there to approve it
+// in the browser: `--agent no` overrides the agent detection for this one command and
+// ASPEN_INTERACTIVE=1 the terminal detection (the CLI's own overrides, for a harness driving the
+// browser hand-off). `--credential-store keyring` keeps it from asking whether to fall back to a
+// file, which no agent can answer. The token goes from the browser to the keychain; the model sees
+// only the authorize URL and the result.
+export const loginCommand = (url) => isWindows
+  ? `$env:ASPEN_INTERACTIVE='1'; aspen login -i ${url} --agent no --credential-store keyring; Remove-Item Env:ASPEN_INTERACTIVE`
+  : `ASPEN_INTERACTIVE=1 aspen login -i ${url} --agent no --credential-store keyring`
+
 const installCommand = (cdn) => isWindows
   ? `irm ${cdn}/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\aspenup-installer.ps1" -NoModifyPath -Yes`
   : `curl --proto '=https' --tlsv1.2 -LsSf ${cdn}/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path`
@@ -188,8 +198,8 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
   if (!instance) {
     lines.push(
       'The Aspen CLI is installed but not signed in to any instance.',
-      'At the first opportunity, prompt the user to sign in with OAuth: invoke the `getting-started` skill.',
-      'The login opens a browser and needs a real terminal, so the user runs it, not you: `aspen login -i <instance URL>`.'
+      'At the first opportunity, sign in with OAuth: invoke the `getting-started` skill (step 2).',
+      `You run \`${loginCommand('<instance URL>')}\` with a timeout of at least 6 minutes; the user approves in the browser it opens.`
     )
     if (here?.instance) lines.push(`This directory belongs to \`${here.instance}\` — that is the URL to sign in to.`)
     lines.push(update(false))
@@ -211,7 +221,7 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
   if (here.instance && !sameInstance(here.instance, instance)) {
     lines.push(
       `The CLI is signed in to \`${instance}\`, but this directory belongs to \`${here.instance}\`, so every \`aspen move\` here will refuse.`,
-      `Tell the user before any deploy: signing in again replaces the current login — \`aspen login -i ${here.instance}\`, run by them in a terminal.`
+      `Before any deploy, tell the user that signing in again replaces the current login, then sign in to this directory's instance: \`${loginCommand(here.instance)}\` (\`getting-started\` step 2).`
     )
   }
   return lines.join('\n')

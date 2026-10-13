@@ -14,7 +14,9 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
 - **Never teach a CLI shape that does not exist** (`metacode/`, `.aspen/bin/aspen` in the
   folder, `./ac validate`, `aspen download`, API-key login). Nothing checks this for you; read
   `aspen --help`.
-- **The model never handles a credential.** OAuth login is handed to the user; no `--api-key`.
+- **The model never handles a credential.** It runs OAuth `aspen login` with `--agent no` and
+  `ASPEN_INTERACTIVE=1` (`getting-started` §2): the user approves in the browser and the token
+  goes to the OS keyring. Never `--api-key`.
   `instance-migration` signs in through the browser for each command (`scripts/signin.mjs`); the
   token lives only in that process's memory and is never written.
 - **Every skill is routed from `using-aspen`**, and its frontmatter `description` says *when* to

@@ -74,9 +74,19 @@ test('aspenup\'s CLI by ~ or $HOME is allowed, wherever the command names it fro
   }
 })
 
-test('login is refused, logout asks', t => {
+test('login runs only in the agent shape and never with an API key; logout asks', t => {
   const m = machine(t)
-  assert.match(m.run(`aspen login -i ${A}`).hard[0], /user's to run/)
+  assert.match(m.run(`aspen login -i ${A}`).hard[0], /ASPEN_INTERACTIVE=1 aspen login -i <instance URL> --agent no --credential-store keyring/)
+  assert.match(m.run(`aspen login -i ${A} --agent no`).hard[0], /refuses OAuth/) // ASPEN_INTERACTIVE missing
+  for (const c of [
+    `ASPEN_INTERACTIVE=1 aspen login -i ${A} --agent no --credential-store keyring`,
+    `ASPEN_INTERACTIVE=true ~/.aspen/bin/aspen --agent=no login -i ${A}`,
+    `export ASPEN_INTERACTIVE=1 && aspen login -i ${A} --agent no`,
+    `$env:ASPEN_INTERACTIVE='1'; aspen login -i ${A} --agent no; Remove-Item Env:ASPEN_INTERACTIVE`
+  ]) assert.deepEqual(m.run(c), { hard: [], confirm: [] }, c)
+  for (const key of ['-k secret', '--api-key secret', '--api-key=secret']) {
+    assert.match(m.run(`ASPEN_INTERACTIVE=1 aspen login -i ${A} --agent no ${key}`).hard[0], /never signs in with an API key/, key)
+  }
   assert.match(m.run('aspen logout').confirm[0], /removes the stored login/)
 })
 

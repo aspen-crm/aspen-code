@@ -82,7 +82,7 @@ remove.
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.8 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.9 or
 later, enabled.
 
 Already installed? Update it. Each release carries a new version number, which is what an update
@@ -153,18 +153,29 @@ line to add: `. "$HOME/.aspen/env"` in `~/.zshrc` (zsh) or `~/.bashrc` (bash; `~
 macOS), `source "$HOME/.aspen/env.fish"` in `~/.config/fish/config.fish` (fish). On Windows, give
 them the change the installer printed. New terminals then find `aspen`.
 
-### 5. Sign in — the user does this
+### 5. Sign in — you run it, the user approves
 
-`aspen login` signs in with OAuth in a browser. The CLI refuses to run it from an agent, so
-**don't run it yourself, and don't suggest an API key.** Give the user this, filled in, and wait:
+`aspen login` signs in with OAuth in a browser. Under an agent the CLI refuses it unless told the
+user is there to approve: `--agent no` and `ASPEN_INTERACTIVE=1` say so, for this one command.
+**Never use an API key.** Tell the user a browser will open for them to sign in and approve, then
+run this, filled in, with a timeout of at least 6 minutes (the CLI waits up to 5):
 
-> In your own terminal (VS Code: **Terminal → New Terminal**), run:
->
-> ```
-> aspen login -i https://<host>/<domain>/<instance>
-> ```
->
-> A browser opens; sign in to the instance and approve. Come back when it says "Login succeeded".
+macOS / Linux:
+
+```sh
+ASPEN_INTERACTIVE=1 ~/.aspen/bin/aspen login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:ASPEN_INTERACTIVE='1'; & "$HOME\.aspen\bin\aspen.exe" login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring; Remove-Item Env:ASPEN_INTERACTIVE
+```
+
+If the browser doesn't open, give the user the URL the CLI prints. It ends with "Login
+succeeded". If it fails because the machine has no keychain (headless Linux), give the user
+`aspen login -i <url>` to run in their own terminal (VS Code: **Terminal → New Terminal**) and
+wait.
 
 **Check:** the `instance` field of `~/.config/aspen/credentials.json` (Windows:
 `%APPDATA%\aspen\credentials.json`) names that instance. Read only that field; the secret is in
@@ -191,9 +202,10 @@ The plugin takes it from there:
   showing the plan and asking first.
 - **Checks everything** with `aspen doctor`.
 
-- **Offers to switch the session** into the new instance folder (`<domain>_<instance>`).
+- **Moves the session** into the new instance folder (`<domain>_<instance>`). If that folder is
+  outside the one the session started in, open a new session there.
 
-Say yes, or open a new session inside that folder. Then describe the change you want, e.g. *"Add
+Then describe the change you want, e.g. *"Add
 a renewal date and an auto-renew flag to accounts, and show them on the account layout."*
 
 ---
@@ -205,6 +217,6 @@ a renewal date and an auto-renew flag to accounts, and show them on the account 
 | `marketplace add` fails | With `aspen-crm/aspen-code`: git is missing or GitHub is unreachable; use the without-git source in step 1. Otherwise GitHub is unreachable from this network |
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
 | `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or add the PATH line from step 4 and open a new terminal |
-| `aspen login` says "Interactive login is not supported" | It was run by the agent. The user runs it in their own terminal |
+| `aspen login` says "Interactive login is not supported" | It ran under an agent without `--agent no` and `ASPEN_INTERACTIVE=1`: use the step 5 command |
 | npm fails with `E401` / "Unable to authenticate" | `typescript/package-lock.json` was resolved through a private mirror. When the plugin asks, let it delete the lockfile and `node_modules` and re-install from public npm |
 | Go back to production | `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen`. Codex: `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen` |

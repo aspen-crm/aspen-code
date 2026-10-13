@@ -64,11 +64,11 @@ test('CLI in ~/.aspen/bin but not on PATH: says to use the full path', t => {
   assert.ok(out.includes(join(m.home, '.aspen', 'bin', 'aspen')))
 })
 
-test('CLI on PATH, not signed in: prompts the OAuth login and never runs it', t => {
+test('CLI on PATH, not signed in: runs the OAuth login in the agent shape, never with an API key', t => {
   const out = context(machine(t, { cli: true, onPath: true }))
   assert.match(out, /not signed in/)
-  assert.match(out, /aspen login -i/)
-  assert.match(out, /user runs it, not you/)
+  assert.match(out, /ASPEN_INTERACTIVE=1 aspen login -i <instance URL> --agent no --credential-store keyring/)
+  assert.match(out, /approves in the browser/)
   assert.doesNotMatch(out, /api-key/)
 })
 
