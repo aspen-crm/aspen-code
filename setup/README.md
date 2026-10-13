@@ -10,9 +10,6 @@ should live, e.g. `~/Aspen`):
 Run `curl -fsSL https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/README.md` (use curl.exe on Windows), read the whole document, and follow its setup steps. Ask me for my Aspen instance URL when you need it.
 ```
 
-`git` is recommended but not required. Without it, Claude Code installs the plugin from its
-release zip, and Codex from a downloaded copy.
-
 ---
 
 ## For the agent
@@ -28,20 +25,18 @@ First work out two things:
 
 **Ask for the instance URL** unless the user already gave it: `https://<host>/<domain>/<instance>`,
 the instance's address in the browser up to the instance name. Ask once, early — the CLI download
-(step 4) and sign-in both need it.
+(step 2) and sign-in both need it.
 
-### 1. Choose where the plugin comes from
+### 1. Install the plugin
 
-Run `git --version`. If git is missing, suggest installing it (`xcode-select --install` on macOS,
-`winget install --id Git.Git -e` on Windows, the distribution's package on Linux), but carry on
-without it if the user would rather not. Pick the marketplace `<source>` for step 3:
+| Host | Commands |
+|---|---|
+| Claude Code | `claude plugin marketplace add https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json` then `claude plugin install aspen-code@aspen-code` |
+| Codex | `codex plugin marketplace add aspen-crm/aspen-code` then `codex plugin add aspen-code@aspen-code` |
 
-| Host | With git | Without git |
-|---|---|---|
-| Claude Code | `aspen-crm/aspen-code` | `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json` |
-| Codex | `aspen-crm/aspen-code` | `~/.aspen-code`, after the download below |
-
-**Codex without git only:** download the plugin (it fetches only from `github.com`).
+**Codex, if `marketplace add` fails because git is missing:** download the plugin (it fetches
+only from `github.com`), then run the Codex commands with `~/.aspen-code` in place of
+`aspen-crm/aspen-code`.
 
 macOS / Linux:
 
@@ -55,35 +50,13 @@ Windows (PowerShell):
 Remove-Item -Recurse -Force "$HOME\.aspen-code" -ErrorAction SilentlyContinue; New-Item -ItemType Directory "$HOME\.aspen-code" | Out-Null; curl.exe -fsSL -o "$env:TEMP\aspen-code.tar.gz" https://github.com/aspen-crm/aspen-code/archive/refs/heads/main.tar.gz; tar -xzf "$env:TEMP\aspen-code.tar.gz" -C "$HOME\.aspen-code" --strip-components=1
 ```
 
-**Check:** `~/.aspen-code/.claude-plugin/marketplace.json` exists. If the download fails, it's
-network or proxy trouble. Say so and stop.
-
-### 2. Remove the old plugin, if it is installed
-
-`aspen-code@aspen`, an older copy of this plugin, defines skills with the same names. With both installed, the model gets two sets of Aspen instructions.
-
-| Host | Check | Remove (ask first) |
-|---|---|---|
-| Claude Code | `claude plugin list` shows `aspen-code@aspen` | `claude plugin uninstall aspen-code@aspen` |
-| Codex | `codex plugin list` shows `aspen-code@aspen` | `codex plugin remove aspen-code@aspen` |
-
-Remove only `aspen-code@aspen`. Leave the `aspen` marketplace and its other plugins alone:
-removing a marketplace uninstalls everything from it.
-
-Not installed? Move on without mentioning this step — don't tell the user there's nothing to
-remove.
-
-### 3. Install the plugin
-
-| Host | Commands |
-|---|---|
-| Claude Code | `claude plugin marketplace add <source>` then `claude plugin install aspen-code@aspen-code` |
-| Codex | `codex plugin marketplace add <source>` then `codex plugin add aspen-code@aspen-code` |
-
-`<source>` is the one you picked in step 1.
+If the download fails, it's network or proxy trouble. Say so and stop.
 
 **Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.15 or
-later, enabled.
+later, enabled. If the list also shows `aspen-code@aspen`, an older copy with the same skill names,
+ask to remove it: `claude plugin uninstall aspen-code@aspen` (Codex: `codex plugin remove
+aspen-code@aspen`). Remove only that plugin; removing the `aspen` marketplace uninstalls everything
+from it.
 
 Already installed? Update it. Each release carries a new version number, which is what an update
 fetches.
@@ -97,10 +70,10 @@ If an update reports "already at the latest version" but the version is older th
 release, reinstall: `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install
 aspen-code@aspen-code` (Codex: `codex plugin remove`, then `codex plugin add`).
 
-Codex installed from the download? Re-run the step 1 download first, in place of the upgrade.
+Codex installed from the download? Re-run the download first, in place of the upgrade.
 Restart Claude Code or Codex afterwards.
 
-### 4. Install or update the Aspen CLI
+### 2. Install or update the Aspen CLI
 
 **The CLI comes from the instance's environment.** Each environment has its own download host,
 `<cdn>` = `https://static-assets.<app domain>`, where the app domain is the last two labels of the
@@ -153,7 +126,7 @@ line to add: `. "$HOME/.aspen/env"` in `~/.zshrc` (zsh) or `~/.bashrc` (bash; `~
 macOS), `source "$HOME/.aspen/env.fish"` in `~/.config/fish/config.fish` (fish). On Windows, give
 them the change the installer printed. New terminals then find `aspen`.
 
-### 5. Sign in — you run it, the user approves
+### 3. Sign in — you run it, the user approves
 
 `aspen login` signs in with OAuth in a browser. Under an agent the CLI refuses it unless told the
 user is there to approve: `--agent no` and `ASPEN_INTERACTIVE=1` say so, for this one command.
@@ -181,7 +154,7 @@ wait.
 `%APPDATA%\aspen\credentials.json`) names that instance. Read only that field; the secret is in
 the OS keychain, or in this file only if the user chose file storage.
 
-### 6. Load the plugin, then the first prompt
+### 4. Load the plugin, then the first prompt
 
 No restart is needed. Tell the user:
 
@@ -214,9 +187,9 @@ a renewal date and an auto-renew flag to accounts, and show them on the account 
 
 | Symptom | Fix |
 |---|---|
-| `marketplace add` fails | With `aspen-crm/aspen-code`: git is missing or GitHub is unreachable; use the without-git source in step 1. Otherwise GitHub is unreachable from this network |
-| Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: step 2 |
-| `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or add the PATH line from step 4 and open a new terminal |
-| `aspen login` says "Interactive login is not supported" | It ran under an agent without `--agent no` and `ASPEN_INTERACTIVE=1`: use the step 5 command |
+| `marketplace add` fails | Codex without git: use the download in step 1. Otherwise GitHub is unreachable from this network |
+| Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: remove it (step 1's check) |
+| `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or add the PATH line from step 2 and open a new terminal |
+| `aspen login` says "Interactive login is not supported" | It ran under an agent without `--agent no` and `ASPEN_INTERACTIVE=1`: use the step 3 command |
 | npm fails with `E401` / "Unable to authenticate" | `typescript/package-lock.json` was resolved through a private mirror. When the plugin asks, let it delete the lockfile and `node_modules` and re-install from public npm |
 | Go back to production | `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen`. Codex: `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen` |
