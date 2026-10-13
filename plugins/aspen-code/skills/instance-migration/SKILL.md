@@ -74,8 +74,8 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 | 9 | `signout W` | both | nothing; revokes the kept sign-ins |
 
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
-- The pilot writes real records and nothing here can undo a bad full load: never skip it, and
-  settle values with the user before it rather than testing them on it.
+- The pilot writes real records, and undoing a bad full load means deleting what it wrote: never
+  skip it, and settle values with the user before it rather than testing them on it.
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →
   `build-and-deploy`, then `describe W --side target`.
 - A load is safe to run again. On a server error for a batch, run again with `--batch 50`.

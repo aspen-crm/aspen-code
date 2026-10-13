@@ -8,8 +8,9 @@ description: Use when moving records from a Salesforce org or a Salesforce expor
 Read a **Salesforce** object, map it onto the **Aspen** instance whose directory you are in,
 say what does not fit, and load it. `scripts/sfmigrate.mjs` beside this file does the Salesforce
 half; the Aspen half is the `instance-migration` skill's `migrate.mjs`. The user decides which
-objects move and settles every mapping question; the scripts do everything else. Removing loaded
-records is a separate step the user asks for; new objects and fields can't be deleted yet.
+objects move and settles every mapping question; the scripts do everything else. Loaded records
+can be deleted (`instance-migration` has the API), as a separate step the user asks for; new
+objects and fields can't be deleted yet.
 
 ```sh
 SF="<this skill's dir>/scripts/sfmigrate.mjs"

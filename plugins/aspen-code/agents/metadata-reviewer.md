@@ -17,7 +17,7 @@ Gather the evidence:
 Audit, highest severity first:
 1. **Destructive** — a field, picklist item, list-view column or tab removed or its file deleted
    (the check-in rejects dropped children; retire with `"active": false` instead); a narrowed type,
-   length or scale. Nothing on the platform deletes — surface these on their own.
+   length or scale. Deployed metadata can't be deleted yet — surface these on their own.
 2. **Breaking** — a field type/subtype change; a picklist item removed that records may carry; a
    layout or list view still referencing something retired; a collection `extends` whose `tabs`
    omits existing custom tabs.
