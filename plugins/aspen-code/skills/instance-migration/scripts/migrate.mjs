@@ -11,6 +11,7 @@
 //   node migrate.mjs load <workspace>                  dry run → reports/plan.md; writes nothing
 //   node migrate.mjs load <workspace> --run [--limit N] [--batch N]
 //   node migrate.mjs verify <workspace> [--sample N]   counts and a field-by-field sample → reports/verify.md
+//   node migrate.mjs load <workspace> --run --then verify   steps chained on one sign-in
 //
 // The source is only read: its client has no write method. The target is written only by
 // `load --run`, and nothing is ever deleted. There is no upsert and `id_p` cannot be set on
@@ -53,6 +54,12 @@ const HELP = `Copy records from a source Aspen instance into this directory's in
 
 Each command that reaches an instance signs in to it in the browser: describe to both (or the
 --side named), extract to the source, load and verify to the target. Nothing is stored.
+
+  --then <command> [options]   run another step on the same workspace and sign-in, e.g.
+                               describe <workspace> --side target --then load
+                               load <workspace> --run --then verify
+  The chain stops at the first step that does not exit 0. A dry run cannot chain into
+  load --run: the user reads it and says yes first.
 
 The mapping format is in mapping-format.md beside the skill.`
 
@@ -218,16 +225,24 @@ async function describeInstance ({ read }) {
         lookup: f.relationship ?? null,
         objects: f['allowed-objects'] ?? null,
         relatedObjectField: f['related-object-field'] ?? null, // a polyid's companion naming the object it points at
-        picklist: f.picklist ?? null
+        picklist: f.picklist ?? null,
+        // What the instance enforces on write, as the describe resolves it (defaults included).
+        maxLength: f['max-length'] ?? null,
+        minValue: f['min-value'] ?? null,
+        maxValue: f['max-value'] ?? null,
+        dependsOn: f.dependency === 'object' ? f['parent-object'] ?? null : null // the object_ref field whose object narrows the values
       }]))
     }
   }
   const lists = [...new Set(Object.values(objects).flatMap((o) => Object.values(o.fields).map((f) => f.picklist).filter(Boolean)))]
   const picklists = {}
+  const picklistItems = {}
   for (const [name, v] of Object.entries(await variants('/describe/picklist_p', lists))) {
-    picklists[name] = (v.items ?? []).filter((i) => i.active !== false).map((i) => i.name)
+    const items = (v.items ?? []).filter((i) => i.active !== false)
+    picklists[name] = items.map((i) => i.name)
+    picklistItems[name] = items.map((i) => ({ name: i.name, label: i.label ?? null, parentObjects: i['parent-objects'] ?? null }))
   }
-  return { objects, picklists }
+  return { objects, picklists, picklistItems }
 }
 
 // ---- draft: match by name and type; every gap becomes a todo for the user to settle
@@ -306,6 +321,7 @@ function checkMapping (m, T) {
       if (e.objectOf && !o.fields.some((x) => x.target === e.objectOf && x.lookup && !x.drop)) throw new Stop(`${at}: objectOf ${e.objectOf} is not a lookup this object writes`)
       for (const x of lookupObjects(e)) if (!names.has(x)) throw new Stop(`${at}: lookup ${x} is not an object in this mapping; migrate it or use {"object", "match"}`)
       if (isMatch(e) && !(e.lookup.object && e.lookup.match)) throw new Stop(`${at}: a match lookup needs "object" and "match"`)
+      if (isMatch(e) && e.lookup.by != null && e.lookup.by !== 'value') throw new Stop(`${at}: a match lookup's "by" is "value" or absent`)
     }
   }
 }
@@ -314,7 +330,9 @@ function checkMapping (m, T) {
 // lookup to the object itself or to one placed later is filled by the second pass.
 function loadOrder (m) {
   const byName = Object.fromEntries(m.objects.map((o) => [o.source, o]))
-  const deps = Object.fromEntries(m.objects.map((o) => [o.source, new Set(o.fields.filter((e) => !e.drop).flatMap(lookupObjects).filter((d) => d !== o.source && byName[d]))]))
+  // A match lookup onto an object this mapping also loads waits for it, so it matches what loaded.
+  const parents = (e) => isMatch(e) ? m.objects.filter((x) => x.target === e.lookup.object).map((x) => x.source) : lookupObjects(e)
+  const deps = Object.fromEntries(m.objects.map((o) => [o.source, new Set(o.fields.filter((e) => !e.drop).flatMap(parents).filter((d) => d !== o.source && byName[d]))]))
   const order = []
   const placed = new Set()
   const unplaced = (n) => [...deps[n]].filter((d) => !placed.has(d)).length
@@ -400,7 +418,29 @@ function format (v, f) {
   return { value: s }
 }
 
-function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred, targetOf = {} }) {
+// What the instance checks on write, so a dry run fails the row instead of the load: the length
+// and range the describe declares, and what the phone and url subtypes accept (E.164; http/https).
+function rejects (s, f) {
+  if (s === '') return null
+  if (f.type === 'text') {
+    const n = [...s].length
+    if (f.maxLength != null && n > f.maxLength) return ['too long', `${n} characters; the field allows ${f.maxLength}`]
+    if (f.subtype === 'phone' && !/^\+[0-9]{1,15}$/.test(s)) return ['not an E.164 phone number', s]
+    if (f.subtype === 'url') {
+      let scheme = null
+      try { scheme = new URL(s).protocol } catch {}
+      if (scheme !== 'http:' && scheme !== 'https:') return ['not an http or https URL', s]
+    }
+  }
+  if (f.type === 'number' || f.type === 'currency') {
+    if (f.minValue != null && Number(s) < Number(f.minValue)) return ['below the minimum', `${s} < ${f.minValue}`]
+    if (f.maxValue != null && Number(s) > Number(f.maxValue)) return ['above the maximum', `${s} > ${f.maxValue}`]
+  }
+  return null
+}
+
+function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targetOf = {} }) {
+  const picklists = lists.picklists ?? {}
   const values = {}
   const errors = []
   const points = {}
@@ -419,7 +459,7 @@ function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred, t
     if (e.lookup && v != null) {
       if (isMatch(e)) {
         const r = refs[`${e.lookup.object}.${e.lookup.match}`]
-        const key = r.source[v]
+        const key = e.lookup.by === 'value' ? v : r.source?.[v]
         const id = key == null ? undefined : r.target.get(key)
         if (id) { points[e.target] = e.lookup.object; v = id } else if (e.missing === 'null') v = null
         else { err(e.target, 'no match on the target', `no ${e.lookup.object} with ${e.lookup.match} = ${key ?? '(blank)'}`); continue }
@@ -436,14 +476,30 @@ function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred, t
     if (out.value === null && f.required) { err(e.target, 'required', 'blank'); continue }
     // A reference picklist (object type, security profile, field) names no list; the instance checks it.
     if (f.type === 'picklist' && f.picklist && out.value != null && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
+    const bad = out.value == null ? null : rejects(out.value, f)
+    if (bad) { err(e.target, ...bad); continue }
     values[e.target] = out.value
   }
   for (const e of o.fields) {
-    if (e.drop || !e.objectOf || deferred.has(e.target)) continue
+    // A row waiting on its polyid's record is written later; its companion is not blank yet.
+    if (wait || e.drop || !e.objectOf || deferred.has(e.target)) continue
     const v = points[e.objectOf] ?? null
     if (v === null && TO.fields[e.target]?.required) { err(e.target, 'required', `blank: ${e.objectOf} is blank`); continue }
     values[e.target] = v
   }
+  // An object-dependent picklist value must allow the object its parent-object field names.
+  for (const [name, v] of Object.entries(values)) {
+    const f = TO.fields[name]
+    if (wait || !f?.dependsOn || v == null || !(f.dependsOn in values)) continue
+    const on = values[f.dependsOn]
+    const allows = (lists.picklistItems?.[f.picklist] ?? []).find((i) => i.name === v)?.parentObjects
+    if (on == null) err(name, 'parent object is blank', `${f.dependsOn} is blank`)
+    else if (allows && !allows.includes(on)) err(name, 'not allowed on that object', `${v} is not allowed on ${on} (only ${allows.join(', ')})`)
+  }
+  // Aspen gives any object with a currency field a ccode_p (the record's currency_p) and refuses a
+  // currency value sent without one. The describe names no link between them: this is the platform's rule.
+  const money = Object.keys(values).filter((n) => values[n] != null && TO.fields[n]?.type === 'currency')
+  if (!wait && TO.fields.ccode_p && money.length && values.ccode_p == null && !errors.some((x) => x.field === 'ccode_p')) err('ccode_p', 'required with a currency value', `${money.join(', ')} set, ccode_p blank`)
   return { values, errors, wait }
 }
 
@@ -493,8 +549,12 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   const refs = {}
   for (const ref of matchRefs(m)) {
     const file = ws.path('extract', 'match', `${ref.object}.${ref.match}.json`)
-    if (!existsSync(file)) throw new Stop(`the mapping matches ${ref.object} by ${ref.match}, which the extract lacks; run extract again`)
-    refs[`${ref.object}.${ref.match}`] = { source: readJson(file), target: await indexBy(tgt.reader, ref.object, ref.match) }
+    if (ref.by !== 'value' && !existsSync(file)) throw new Stop(`the mapping matches ${ref.object} by ${ref.match}, which the extract lacks; run extract again`)
+    refs[`${ref.object}.${ref.match}`] = { ...ref, source: ref.by === 'value' ? null : readJson(file), target: await indexBy(tgt.reader, ref.object, ref.match) }
+  }
+  // A record this run inserts can be matched by the objects loaded after it (owners onto team members).
+  const indexed = (o, values, id) => {
+    for (const r of Object.values(refs)) if (r.object === o.target && values[r.match] != null && !r.target.has(values[r.match])) r.target.set(values[r.match], id)
   }
   const resolveId = (objs, id) => {
     for (const x of objs) {
@@ -518,7 +578,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     const ctx = { resolve: resolveId, extracted, refs, deferred: step.deferred, targetOf }
     const inserts = []; const updates = []; const keys = new Set()
     for (const row of rows[o.source]) {
-      const c = convert(row, o, TO, T.picklists, ctx)
+      const c = convert(row, o, TO, T, ctx)
       const known = idmaps[o.source].get(row.id_p)
       if (known) {
         st.loaded++
@@ -541,13 +601,13 @@ async function load (ws, m, tgt, { run, limit, batch }) {
       inserts.push({ row, values: c.values })
     }
     if (!run) {
-      for (const i of inserts) planned[o.source].add(i.row.id_p)
+      for (const i of inserts) { planned[o.source].add(i.row.id_p); indexed(o, i.values, PLANNED) }
       st.inserted = inserts.length
       st.updated = updates.length
       continue
     }
     await writeBatches(tgt.write, 'POST', o.target, inserts, batch, (i, id, e) => {
-      if (id) { st.inserted++; remember(o, i.row.id_p, id, false) } else fail(o, i.row.id_p, e)
+      if (id) { st.inserted++; remember(o, i.row.id_p, id, false); indexed(o, i.values, id) } else fail(o, i.row.id_p, e)
     })
     await writeBatches(tgt.write, 'PATCH', o.target, updates, batch, (i, id, e) => {
       if (id) st.updated++; else fail(o, i.row.id_p, e)
@@ -661,7 +721,7 @@ async function verify (ws, m, tgt, { sample }) {
   }
   const refs = {}
   for (const ref of matchRefs(m)) {
-    refs[`${ref.object}.${ref.match}`] = { source: readJson(ws.path('extract', 'match', `${ref.object}.${ref.match}.json`)), target: await indexBy(tgt.reader, ref.object, ref.match) }
+    refs[`${ref.object}.${ref.match}`] = { source: ref.by === 'value' ? null : readJson(ws.path('extract', 'match', `${ref.object}.${ref.match}.json`)), target: await indexBy(tgt.reader, ref.object, ref.match) }
   }
   const ctx = { resolve: (objs, id) => objs.map((x) => idmaps[x]?.get(id)).find(Boolean), extracted, refs, deferred: new Set(), targetOf: Object.fromEntries(m.objects.map((o) => [o.source, o.target])) }
   const out = []; const mismatches = []
@@ -683,7 +743,7 @@ async function verify (ws, m, tgt, { sample }) {
       const t = idmaps[o.source].get(row.id_p)
       const a = actual.get(t)
       if (!a) { mismatches.push({ object: o.source, id: row.id_p, field: '(record)', expected: t, actual: null }); differing++; continue }
-      const c = convert(row, o, TO, T.picklists, ctx)
+      const c = convert(row, o, TO, T, ctx)
       let bad = false
       for (const [field, expected] of Object.entries(c.values)) {
         if (!same(expected, a[field], TO.fields[field])) { mismatches.push({ object: o.source, id: row.id_p, field, expected, actual: a[field] ?? null }); bad = true }
@@ -732,11 +792,23 @@ function options (args) {
   return { ...o, limit: count('limit', 0, Number.MAX_SAFE_INTEGER), batch: count('batch', 1, MAX_BATCH) ?? DEFAULT_BATCH, sample: count('sample', 1, 1000) ?? 20 }
 }
 
+const COMMANDS = ['init', 'describe', 'draft', 'extract', 'load', 'verify']
+
 export async function main (argv) {
   const [cmd, wsArg, ...rest] = argv
   if (!cmd || ['help', '--help', '-h'].includes(cmd) || rest.includes('--help')) { say(HELP); return 0 }
-  if (!['init', 'describe', 'draft', 'extract', 'load', 'verify'].includes(cmd)) throw new Stop(`unknown command: ${cmd}\n\n${HELP}`)
-  const opts = options(rest)
+  // `--then` starts the next step: its command, then its options; the workspace is the first step's.
+  const steps = [[cmd]]
+  for (const a of rest) a === '--then' ? steps.push([]) : steps.at(-1).push(a)
+  const plan = steps.map(([c, ...o]) => {
+    if (!COMMANDS.includes(c)) throw new Stop(`unknown command: ${c ?? '(none after --then)'}\n\n${HELP}`)
+    if (c === 'init' && steps.length > 1) throw new Stop('init cannot be chained: run it on its own')
+    return { cmd: c, opts: options(o) }
+  })
+  if (plan.some((s, i) => s.cmd === 'load' && s.opts.run && plan.slice(0, i).some((p) => p.cmd === 'load' && !p.opts.run))) {
+    throw new Stop('load --run cannot follow a dry run in one chain: the user reads the dry run and says yes first')
+  }
+  const opts = plan[0].opts
   const ws = workspace(wsArg)
 
   if (cmd === 'init') {
@@ -751,12 +823,19 @@ export async function main (argv) {
   }
 
   const m = readMapping(ws)
-  const opened = []
-  const open = async (side) => { const c = await connect(m[side], side); opened.push(c); return c }
+  // One sign-in per side for the whole chain.
+  const opened = {}
+  const open = (side) => (opened[side] ??= connect(m[side], side))
   try {
-    return await run(cmd, ws, m, opts, open)
+    let code = 0
+    for (const [i, s] of plan.entries()) {
+      if (plan.length > 1) say(`== ${s.cmd}`)
+      code = await run(s.cmd, ws, i ? readMapping(ws) : m, s.opts, open)
+      if (code !== 0 && i < plan.length - 1) { say(`stopped: ${s.cmd} exited ${code}; ${plan.slice(i + 1).map((x) => x.cmd).join(', ')} did not run`); break }
+    }
+    return code
   } finally {
-    await Promise.allSettled(opened.map((c) => c.close()))
+    await Promise.allSettled(Object.values(opened).map(async (c) => (await c).close()))
   }
 }
 
@@ -799,7 +878,7 @@ async function run (cmd, ws, m, opts, open) {
       writeLines(ws.path('extract', `${o.source}.jsonl`), out)
       say(`${o.source}: ${out.length} records`)
     }
-    for (const ref of matchRefs(m)) {
+    for (const ref of matchRefs(m).filter((r) => r.by !== 'value')) {
       const map = {}
       for await (const r of pageAll(reader.query, { object: ref.object, select: `id_p, ct_p, ${ref.match}` })) map[r.id_p] = r[ref.match]
       writeJson(ws.path('extract', 'match', `${ref.object}.${ref.match}.json`), map)

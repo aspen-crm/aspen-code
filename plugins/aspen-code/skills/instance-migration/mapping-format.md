@@ -47,7 +47,8 @@ left.
 | `"from": "f", "map": {…}` | The source value looked up in the table. A value missing from the table is an error unless `default` is set (`null` is allowed). |
 | `"from": "f", "lookup": "obj"` | The target id of the record migrated from `obj`, read from the id map. `obj` must be in this mapping. |
 | `"from": "f", "lookup": ["a", "b"]` | For a field that can point to several objects: the target id from whichever object's id map holds the source id. |
-| `"from": "f", "lookup": { "object": "user_p", "match": "email_p" }` | For an object that is not migrated: find the source record's `email_p`, then the target record with the same `email_p`. |
+| `"from": "f", "lookup": { "object": "user_p", "match": "email_p" }` | For an object that is not migrated: find the source record's `email_p`, then the target record with the same `email_p`. Records this run inserts into `user_p` are matched too: the entry that loads them goes first. |
+| `"from": "f", "lookup": { "object": "currency_p", "match": "currency_code_p", "by": "value" }` | The value itself (after `map`) is what to match: the target record whose `currency_code_p` equals it. For a source that holds a code, not a record id. No match file is extracted. |
 | `"objectOf": "what_p"` | For a polyid's companion (`whaton_p`, `customeron_p`, `owneron_p`): the target object the named polyid's id resolved through, or blank when it is blank. Use it rather than a constant whenever the polyid's lookup lists more than one object; it keeps the pair from disagreeing. |
 | `"expr": "…"` | A JavaScript expression over the source row `r`, e.g. `` `${r.first_c} ${r.last_c}`.trim() ``. It returns a string, a number, a boolean or `null`. Use it only for a rule the user stated, and keep their words in `note`. |
 | `"from": "f", "drop": true` | Nothing. It records that the field was left out on purpose. |
@@ -71,6 +72,12 @@ Other keys on a field entry:
 - A target field the describe marks `read-only` (an increment, a converted currency, or a field
   the initial lifecycle state locks) gets a `todo` from `draft`: drop it or map elsewhere.
 - `ccode_p` takes a `currency_p` record id, not a code such as `"USD"`: match it by
-  `currency_code_p`, as in the example above.
+  `currency_code_p`, as in the example above. Any object with a currency field has a `ccode_p`, and
+  the instance refuses a currency value without it: the dry run fails such a row too.
+- The dry run fails a row the target would refuse for what `schema/target.json` declares: a text
+  longer than `maxLength`, a number outside `minValue`..`maxValue`, a phone that is not E.164
+  (`+` and up to 15 digits), a URL that is not http or https, and an object-dependent picklist
+  value (`dependsOn`) its parent object does not allow (`picklistItems[].parentObjects`). Triggers
+  and validation rules it cannot see: the pilot finds those.
 - A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.

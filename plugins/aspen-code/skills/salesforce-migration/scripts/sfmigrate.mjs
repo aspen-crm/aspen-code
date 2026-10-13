@@ -120,18 +120,6 @@ const schema = (ws, side) => {
   return readJson(file)
 }
 
-// The live describe carries type and subtype but not max-length, and Aspen rejects an over-long
-// value at write time, which a dry run never sees. The instance directory holds the compiled
-// metadata, so read the cap from there.
-function localCaps (ws, object) {
-  for (const d of localObjects(ws, object)) {
-    const out = {}
-    for (const f of d.fields ?? []) if (f['max-length'] != null) out[f.name] = f['max-length']
-    if (Object.keys(out).length) return out
-  }
-  return {}
-}
-
 // The instance directory's own metadata for `object`, most complete first.
 function localObjects (ws, object) {
   const out = []
@@ -344,7 +332,7 @@ const ADDRESS = /^(Billing|Shipping|Mailing|Other)(Street|City|State|PostalCode|
 // decision, not a field match. Naming each one keeps it out of the undifferentiated drop pile.
 const PLATFORM = {
   RecordTypeId: ['record type', 'Aspen models this as an object type (otype_p). Map each Salesforce record type to a target object type by hand, or drop it and let the target default apply.'],
-  CurrencyIsoCode: ['multi-currency', "Set only if the target object has a currency-code field; otherwise the target's own currency applies."],
+  CurrencyIsoCode: ['multi-currency', 'Mapped to ccode_p when a currency field on this object maps; without one, nothing needs it.'],
   OwnerId: ['owner', 'Matched to the target user by email. Users with no account on the target leave it blank.'],
   IsPersonAccount: ['person account', 'Person accounts are one Salesforce record standing for an account and a contact. Decide which target object each becomes before mapping any field.'],
   ParentId: ['hierarchy', 'A self-lookup. Migrates only if the parent records are in the same extract; load fills it on a second pass.']
@@ -391,15 +379,19 @@ function describeObject (ws, m, name) {
 
 // ---- draft: propose a target field for every source field, and a category for every gap
 
+// A counterpart chosen by its description wins over a name that only looks the same: a Salesforce
+// User is a team member (team_p), not a platform login (user_p).
 function pickTargetObject (sourceName, sourceLabel, tgt) {
+  const alias = Object.hasOwn(JUNCTIONS, sourceName) ? JUNCTIONS[sourceName].target
+    : Object.hasOwn(PARTICIPANTS, sourceName) ? PARTICIPANTS[sourceName].target
+      : Object.hasOwn(OBJECT_SYNONYMS, sourceName) ? OBJECT_SYNONYMS[sourceName] : null
+  const aliased = alias ? Object.keys(tgt.objects).find((name) => bare(name) === alias) : null
+  if (aliased) return aliased
   const want = new Set([normalize(sourceName), normalize(sourceLabel)])
   for (const [name, o] of Object.entries(tgt.objects)) {
     if (want.has(bare(name)) || want.has(normalize(o.label))) return name
   }
-  const alias = Object.hasOwn(JUNCTIONS, sourceName) ? JUNCTIONS[sourceName].target
-    : Object.hasOwn(PARTICIPANTS, sourceName) ? PARTICIPANTS[sourceName].target
-      : Object.hasOwn(OBJECT_SYNONYMS, sourceName) ? OBJECT_SYNONYMS[sourceName] : null
-  return alias ? Object.keys(tgt.objects).find((name) => bare(name) === alias) ?? null : null
+  return null
 }
 
 function targetIndex (T) {
@@ -458,12 +450,12 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
   if (!T) entry.todo = `no Aspen object matches ${name} by name: read the object descriptions in schema/target.json and set "target" to the one that holds what ${name} holds (ask the user when none clearly does), or create one (lean-data-model -> model-first -> metadata -> build-and-deploy), then describe the target again`
   const idx = T ? targetIndex(T) : null
   const filled = fill?.objects?.[name]?.fields ?? null
-  const caps = T ? localCaps(ws, target) : {}
   // fill.json held a bare number before max lengths were recorded.
   const rate = (f) => { const v = filled?.[f]; return v == null ? 0 : (typeof v === 'number' ? v : v.fill) }
   const observed = (f) => { const v = filled?.[f]; return (v == null || typeof v === 'number') ? null : v.maxLen }
   const rows = []
   const fields = []
+  const dependent = []
 
   for (const [fname, f] of Object.entries(S.fields)) {
     const [gap, how] = gapOf(f)
@@ -556,22 +548,20 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
       row.note = `${f.sf.type} in Salesforce, ${tf.type}/${tf.subtype} on ${tname}`
       e.todo = `types differ: ${f.sf.type} in Salesforce, ${tf.type} on ${tname}. Convert it ("expr"), pick another field, or drop it.`
     } else if (f.picklist && tf.picklist) {
-      const values = src.picklists[f.picklist] ?? []
-      const allowed = new Set(tgt.picklists[tf.picklist] ?? [])
-      const missing = values.filter((v) => !allowed.has(v))
-      e.map = Object.fromEntries(values.filter((v) => allowed.has(v)).map((v) => [v, v]))
-      if (missing.length) {
-        row.confidence = 'close'; row.gap = 'picklist values'; row.decision = 'todo'
-        row.note = `${missing.length} of ${values.length} values are not on ${tf.picklist}: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', ...' : ''}`
-        e.todo = `values not on the target picklist ${tf.picklist}: ${missing.join(', ')}. Add each to "map", or set "default".`
-      } else {
-        row.confidence = 'exact'; row.note = `all ${values.length} values exist on ${tf.picklist}`
-      }
-    } else if (f.type === 'text' && tf.type === 'text' && overLength(f, tf, tname, caps, observed(fname), row)) {
+      settlePicklist(e, row, src.picklists[f.picklist] ?? [], tgt, tf, null)
+      if (tf.dependsOn) dependent.push({ e, row, values: src.picklists[f.picklist] ?? [], tf })
+    } else if (f.sf.type === 'percent' && tf.maxValue != null && Number(tf.maxValue) <= 1) {
+      // Salesforce holds 50% as 50; the describe says the target takes a fraction.
+      delete e.from
+      e.expr = `r.${fname} == null ? null : Number(r.${fname}) / 100`
+      row.confidence = 'close'; row.gap = 'percent as a fraction'
+      row.note = `Salesforce holds a percent as 0-100 and ${tname} takes ${tf.minValue ?? 'up'} to ${tf.maxValue}: divided by 100`
+    } else if (f.type === 'text' && tf.type === 'text' && overLength(f, tf, tname, observed(fname), row)) {
       // overLength filled the row in; nothing more to decide here.
     } else if (['url', 'email', 'phone'].includes(tf.subtype)) {
+      const takes = { phone: 'only E.164 (+ and up to 15 digits)', url: 'only an http or https URL', email: 'only a valid address' }[tf.subtype]
       row.confidence = 'close'; row.gap = `validated ${tf.subtype}`
-      row.note = `${tname} is a ${tf.subtype} field and Aspen validates the format on write. Salesforce is laxer, so some values are rejected at load, not at dry run. Normalize them with "expr", or drop the field.`
+      row.note = `${tname} takes ${takes}, and Salesforce is laxer. ${tf.subtype === 'email' ? 'The pilot shows what it rejects' : 'The dry run lists the rows it would reject'}: normalize them with "expr", or drop the field.`
     } else {
       row.confidence = rule === 'name' ? 'exact' : 'close'
       if (rule !== 'name') row.note = `matched by ${rule}`
@@ -598,6 +588,49 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
       rows.push({ source: from, label: `the ${part.activity}'s ${from.split('.')[1]}`, sfType: 'parent field', target: tname, rule: 'activity', confidence: 'exact', gap: null, decision: 'map', fill: null, note: `copied from the ${part.activity} this row belongs to` })
     }
     add(named('owner'), `${part.activity}.OwnerId`, userRef('Owner'))
+  }
+
+  // An object-dependent picklist takes only the values its parent object allows. Which object that
+  // is comes from the polyid whose companion is the field's parent-object (whaton_p beside what_p).
+  for (const d of dependent) {
+    const on = fields.find((x) => x.target === d.tf.dependsOn && x.objectOf && !x.drop)
+    const poly = on ? fields.find((x) => x.target === on.objectOf && x.lookup && !x.drop) : null
+    const objs = !poly ? [] : typeof poly.lookup === 'object' && !Array.isArray(poly.lookup) ? [poly.lookup.object]
+      : [].concat(poly.lookup).map((x) => pickTargetObject(x, src.objects[x]?.label ?? x, tgt)).filter(Boolean)
+    if (objs.length) settlePicklist(d.e, d.row, d.values, tgt, d.tf, objs)
+  }
+
+  // Aspen gives any object with a currency field a ccode_p, a lookup to currency_p, and refuses a
+  // currency value without it. The describe names no link between the two, so this is the platform's
+  // rule. Salesforce's CurrencyIsoCode holds the code: it is matched to the currency_p record whose
+  // unique code picklist has that label (USD -> usd_p), and the dry run reports a code the target has
+  // no record for.
+  const cc = T?.fields?.ccode_p
+  const money = T && fields.some((x) => !x.drop && T.fields[x.target]?.type === 'currency' && T.fields[x.target]?.subtype === 'currency')
+  if (money && cc?.lookup && !fields.some((x) => x.target === 'ccode_p' && !x.drop)) {
+    const C = tgt.objects[cc.lookup]
+    const code = C ? Object.keys(C.fields).find((n) => C.fields[n].unique && C.fields[n].picklist) : null
+    const lookup = code ? { object: cc.lookup, match: code, by: 'value' } : null
+    const row = rows.find((r) => r.source === 'CurrencyIsoCode') ?? { source: '', label: cc.label, sfType: '', fill: null }
+    if (!rows.includes(row)) rows.push(row)
+    Object.assign(row, { target: 'ccode_p', rule: 'currency', gap: 'record currency' })
+    const iso = S.fields.CurrencyIsoCode
+    if (lookup && iso) {
+      const values = src.picklists[iso.picklist] ?? []
+      const { map, missing } = seedPicklist(values, tgt.picklistItems?.[C.fields[code].picklist] ?? [])
+      const e = { target: 'ccode_p', from: 'CurrencyIsoCode', map, lookup }
+      const at = fields.findIndex((x) => x.from === 'CurrencyIsoCode' && x.drop)
+      if (at >= 0) fields.splice(at, 1)
+      Object.assign(row, { confidence: 'close', decision: missing.length ? 'todo' : 'map', note: `a currency value needs the record's currency: CurrencyIsoCode matched to the ${cc.lookup} whose ${code} is labelled with it${missing.length ? `; no ${code} for ${missing.join(', ')}` : ''}` })
+      if (missing.length) e.todo = `no ${cc.lookup}.${code} is labelled ${missing.join(', ')}: add each to "map", or set "default"`
+      fields.push(e)
+    } else {
+      const why = lookup
+        ? `Aspen refuses a currency value without the record's currency, and ${name} has no CurrencyIsoCode: set "value" to the ${code} of the org's currency (an item of ${C.fields[code].picklist})`
+        : `Aspen refuses a currency value without ${cc.lookup}, and ${cc.lookup} has no unique code picklist to match on: say how to fill ccode_p, or drop the currency fields`
+      Object.assign(row, { confidence: 'GAP', decision: 'todo', note: why })
+      fields.push({ target: 'ccode_p', ...(lookup ? { lookup } : {}), todo: why })
+    }
   }
 
   if (T) {
@@ -688,10 +721,10 @@ function addressGap (ws, tgt, target, name) {
   return ['address', `Aspen keeps addresses as ${child} records${about ? ` ("${about}")` : ''}, not as fields on ${target}. Migrate them in a second workspace from ${name} to ${child}, with ${target} matched by a unique field, once ${name} has loaded.`]
 }
 
-// A value longer than the target's cap is rejected on write, and a dry run never sees it. Compare
-// the cap from the local metadata against what the sample actually holds.
-function overLength (f, tf, tname, caps, maxLen, row) {
-  const cap = caps[tname]
+// A value longer than the target's cap is rejected on write. Compare the cap the describe declares
+// against what the sample actually holds, so the user decides before the dry run lists the rows.
+function overLength (f, tf, tname, maxLen, row) {
+  const cap = tf.maxLength
   if (!cap) return false
   const sfMax = f.sf.length ?? 0
   if (maxLen != null && maxLen > cap) {
@@ -705,6 +738,33 @@ function overLength (f, tf, tname, caps, maxLen, row) {
     return true
   }
   return false
+}
+
+// A picklist's map, seeded from the target's items: a Salesforce value matches an item by name or
+// by label, ignoring case ("USD" -> usd_p, labelled USD).
+function seedPicklist (values, items) {
+  const by = new Map()
+  for (const i of items) for (const k of [i.name, i.label]) if (k != null && !by.has(String(k).toLowerCase())) by.set(String(k).toLowerCase(), i.name)
+  const map = {}; const missing = []
+  for (const v of values) { const t = by.get(String(v).toLowerCase()); if (t) map[v] = t; else missing.push(v) }
+  return { map, missing }
+}
+
+// With `objs`, only the items an object-dependent picklist allows on every one of those objects.
+function settlePicklist (e, row, values, tgt, tf, objs) {
+  const items = (tgt.picklistItems?.[tf.picklist] ?? []).filter((i) => !objs || !i.parentObjects || objs.every((o) => i.parentObjects.includes(o)))
+  const { map, missing } = seedPicklist(values, items)
+  const where = objs ? ` allows on ${objs.join(' and ')}` : ''
+  e.map = map
+  delete e.todo
+  if (missing.length) {
+    const names = items.map((i) => i.name)
+    row.confidence = 'close'; row.gap = 'picklist values'; row.decision = 'todo'
+    row.note = `${missing.length} of ${values.length} values are not among those ${tf.picklist}${where || ' holds'}: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', ...' : ''}`
+    e.todo = `values not among those ${tf.picklist}${where || ' holds'}: ${missing.join(', ')}. Add each to "map" (${names.slice(0, 12).join(', ')}${names.length > 12 ? ', ...' : ''}), or set "default".`
+  } else {
+    row.confidence = 'exact'; row.gap = null; row.decision = 'map'; row.note = `all ${values.length} values are among those ${tf.picklist}${where || ' holds'}`
+  }
 }
 
 // ---- the gap report: what needs a decision, what maps, and what is being dropped
@@ -921,6 +981,7 @@ function main (argv) {
 
   if (cmd === 'draft') {
     const src = schema(ws, 'source'); const tgt = schema(ws, 'target'); const fill = fillRates(ws)
+    if (!tgt.picklistItems) throw new Stop("schema/target.json predates the length, range and picklist rules draft reads; run the instance-migration skill's `migrate.mjs describe <workspace> --side target` again")
     const names = opts.objects ? String(opts.objects).split(',').map((s) => s.trim()).filter(Boolean) : Object.keys(src.objects)
     const have = new Set(m.objects.map((o) => o.source))
     const migrating = new Set([...have, ...names])

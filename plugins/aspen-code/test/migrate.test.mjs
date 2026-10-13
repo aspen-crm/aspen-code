@@ -103,7 +103,7 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
         if (!known) return { status: 'FAILURE', name, failures: [{ error_type: 'NOT_FOUND' }] }
         variants.push(route === '/describe/object_p'
           ? { name, label: name, active: true, fields: fieldsOf(name).map(f => ({ label: f.name, active: true, required: false, unique: false, 'read-only': false, ...f })) }
-          : { name, label: name, items: known.map(v => ({ name: v, label: v, active: true })) })
+          : { name, label: name, items: known.map(v => typeof v === 'string' ? { name: v, label: v, active: true } : { active: true, ...v }) })
         return { status: 'SUCCESS', name, 'object-type': null, 'variant-index': variants.length - 1 }
       })
       return send(200, { status: 'SUCCESS', data, supplemental: { variants } })
@@ -164,7 +164,7 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
           if (v === null) continue
           if (f.type === 'datetime' && !DATETIME.test(v)) return rowFail(`${k}: not a valid Datetime`)
           if (f.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return rowFail(`${k}: not a valid Date`)
-          if (f.type === 'picklist' && f.picklist && !picklists[f.picklist].includes(v)) return rowFail(`${k}: not a picklist value`)
+          if (f.type === 'picklist' && f.picklist && !picklists[f.picklist].some(i => (i.name ?? i) === v)) return rowFail(`${k}: not a picklist value`)
           if (f.type === 'id' && f.relationship && !(records[f.relationship] ?? []).some(r => r.id_p === v)) return rowFail(`${k}: no such ${f.relationship}`)
         }
         const merged = { ...(existing ?? {}), ...row }
@@ -198,11 +198,16 @@ const SOURCE_OBJECTS = {
 }
 const TARGET_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
-  account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p')],
-  contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c')],
+  account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p'),
+    { name: 'share_p', type: 'number', subtype: 'percentage', 'min-value': '0.00', 'max-value': '1.00' },
+    { name: 'revenue_p', type: 'currency', subtype: 'currency' }, lookup('ccode_p', 'currency_p')],
+  currency_p: [text('currency_code_p', { unique: true })],
+  contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c'),
+    { name: 'phone_p', type: 'text', subtype: 'phone' }, { name: 'site_p', type: 'text', subtype: 'url', 'max-length': 20 }],
   project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true }), { ...text('code_c'), 'read-only': true }],
   // A contact linked to any record; a trigger derives some, and contact_role_chk_p keeps each pair once.
-  contact_role_p: [lookup('contact_p', 'contact_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref' }, text('contact_role_chk_p', { unique: true })],
+  contact_role_p: [lookup('contact_p', 'contact_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref', required: true }, text('contact_role_chk_p', { unique: true }),
+    { ...picklist('role_p'), dependency: 'object', 'parent-object': 'whaton_p' }],
   task_p: [text('subject_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref' }]
 }
 const LONG_NOTE = 'n'.repeat(300)
@@ -229,7 +234,7 @@ const sourceRecords = () => ({
     { id_p: 'v3', ct_p: '2023-02-01T00:00:02.000Z', subject_c: 'Lost', about_c: 'gone' }
   ]
 })
-const targetRecords = () => ({ user_p: [{ id_p: 't1', ct_p: '2025-01-01T00:00:00.000Z', email_p: 'a@x.com' }] })
+const targetRecords = () => ({ user_p: [{ id_p: 't1', ct_p: '2025-01-01T00:00:00.000Z', email_p: 'a@x.com' }], currency_p: [{ id_p: 'usd', ct_p: '2025-01-01T00:00:00.000Z', currency_code_p: 'usd_p' }] })
 
 // The mapping the model writes after settling every todo with the user. person_c comes first on
 // purpose: the load order comes from the lookups, not from the file.
@@ -269,7 +274,7 @@ function browser (home) {
 async function setup (t, { target = targetRecords(), failCreate, warnCreate, expireAfter, api, migrate = script } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
   const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords(), api })
-  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
+  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
   t.after(() => { src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
@@ -358,6 +363,11 @@ test('describe writes both schemas, with lookups and picklist values', async t =
   assert.deepEqual(src.picklists.sector_c, ['tech_c', 'bank_c', 'farm_c'])
   const tgt = JSON.parse(readFileSync(join(s.ws, 'schema', 'target.json'), 'utf8'))
   assert.equal(tgt.objects.account_p.fields.name_p.unique, true)
+  // What the instance enforces on write, kept for the dry run.
+  assert.equal(tgt.objects.contact_p.fields.site_p.maxLength, 20)
+  assert.equal(tgt.objects.account_p.fields.share_p.maxValue, '1.00')
+  assert.equal(tgt.objects.contact_role_p.fields.role_p.dependsOn, 'whaton_p')
+  assert.deepEqual(tgt.picklistItems.role_p[0], { name: 'champion_p', label: 'Champion', parentObjects: ['account_p'] })
 })
 
 test('draft matches by name and type and marks every gap as a todo', async t => {
@@ -450,6 +460,76 @@ test('the dry run reports every error and writes nothing to the target', async t
   assert.ok(plan.indexOf('company_c') < plan.indexOf('person_c'), 'companies load before people')
   assert.ok(!plan.includes('Gamma'), 'record values stay out of the report')
   assert.equal(lines(join(s.ws, 'errors', 'company_c.jsonl')).length, 1)
+})
+
+test('the dry run fails what the target would reject: format, length, range, object-dependent values, a currency without ccode_p', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects[0].fields.push(
+    { target: 'phone_p', expr: "r.id_p === 'p1' ? '+15551234567' : '555-1234'" },
+    { target: 'site_p', expr: "({ p2: 'https://example.com/a/long/path', p3: 'example.com' })[r.id_p] ?? null" })
+  objects[1].fields.push({ target: 'share_p', expr: "r.id_p === 'c3' ? 50 : 0.5" },
+    { target: 'revenue_p', expr: '1000' },
+    { target: 'ccode_p', expr: "({ c1: 'usd_p', c2: null, c3: 'cny_p' })[r.id_p]", lookup: { object: 'currency_p', match: 'currency_code_p', by: 'value' } })
+  objects.push({ source: 'role_c', target: 'contact_role_p', fields: [
+    { target: 'contact_p', from: 'person_c', lookup: 'person_c' }, { target: 'what_p', from: 'company_c', lookup: 'company_c' },
+    { target: 'whaton_p', objectOf: 'what_p' }, { target: 'role_p', expr: "r.id_p === 'r1' ? 'sponsor_p' : 'champion_p'" }] })
+  await s.ready(objects)
+  const r = await s.run('load', s.ws)
+  assert.equal(r.status, 1)
+  const errs = (source) => lines(join(s.ws, 'errors', `${source}.jsonl`)).flatMap(l => l.errors.map(e => `${l.id} ${e.field}: ${e.kind}`)).sort()
+  // c2 sends revenue_p without its currency; c1 sends both. c3's currency has no currency_p: one
+  // error for it, not a second for the amount it carries.
+  assert.deepEqual(errs('company_c'), ['c2 ccode_p: required with a currency value', 'c3 ccode_p: no match on the target', 'c3 share_p: above the maximum'])
+  assert.deepEqual(errs('person_c'), ['p2 phone_p: not an E.164 phone number', 'p2 site_p: too long', 'p3 phone_p: not an E.164 phone number', 'p3 site_p: not an http or https URL'])
+  // r2 points at c3, which failed: it waits for it, and its required whaton_p is not blank yet.
+  assert.deepEqual(errs('role_c'), ['r1 role_p: not allowed on that object'])
+})
+
+test('a match lookup finds records the same run loaded, and can match on the value itself', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects.push({ source: 'user_p', target: 'user_p', key: 'email_p', onMatch: 'skip', fields: [{ target: 'email_p', from: 'email_p' }] })
+  objects[0].fields[3] = { target: 'account_p', expr: "r.company_c ? 'Acme' : null", lookup: { object: 'account_p', match: 'name_p', by: 'value' } }
+  await s.ready(objects)
+  const dry = await s.run('load', s.ws)
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr)
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  // b@x.com was not on the target before this run: the user loads first, then the owner matches it.
+  assert.equal(byName(s.tgt, 'account_p', 'name_p', 'Beta').owner_p, byName(s.tgt, 'user_p', 'email_p', 'b@x.com').id_p)
+  assert.equal(byName(s.tgt, 'contact_p', 'email_p', 'bo@x.com').account_p, byName(s.tgt, 'account_p', 'name_p', 'Acme').id_p)
+  assert.ok(!existsSync(join(s.ws, 'extract', 'match', 'account_p.name_p.json')), 'a value match needs no source map')
+})
+
+test('--then runs the next steps on the same sign-in, and stops at the first that fails', async t => {
+  const s = await setup(t)
+  // A failing dry run stops the chain: verify does not run.
+  const broken = structuredClone(SETTLED)
+  delete broken[1].fields[1].default
+  await s.ready(broken)
+  const stopped = await s.run('load', s.ws, '--then', 'verify')
+  assert.equal(stopped.status, 1)
+  assert.match(stopped.stdout, /stopped: load exited 1; verify did not run/)
+  assert.ok(!existsSync(join(s.ws, 'reports', 'verify.md')))
+
+  s.settle()
+  const before = s.tgt.grants.code
+  const r = await s.run('describe', s.ws, '--side', 'target', '--then', 'load', '--run', '--then', 'verify')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.equal(s.tgt.grants.code - before, 1, 'one sign-in for describe, load and verify')
+  assert.ok(existsSync(join(s.ws, 'reports', 'verify.md')))
+  assert.equal(s.tgt.live.size, 0, 'the sign-in is revoked when the chain ends')
+})
+
+test('a dry run cannot chain into load --run', async t => {
+  const s = await setup(t)
+  await s.ready()
+  const before = writes(s.tgt).length
+  const r = await s.run('load', s.ws, '--then', 'load', '--run')
+  assert.equal(r.status, 2)
+  assert.match(r.stderr, /the user reads the dry run and says yes first/)
+  assert.equal(writes(s.tgt).length, before)
 })
 
 test('a reference picklist, which names no list, is left for the instance to check', async t => {

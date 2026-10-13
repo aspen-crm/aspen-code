@@ -50,7 +50,10 @@ delete command; don't add one, and don't offer a delete as the fix for a bad loa
 
 Each command that reaches an instance opens a browser tab, the user signs in, and the token
 lives only in the script's memory until the command ends. Nothing is stored; you never see a
-token.
+token. Steps chained with `--then` share one sign-in per instance: chain what runs back to back,
+such as `describe W --side target --then load` or `load W --run --then verify`. The chain stops
+at the first step that fails, and a dry run cannot chain into `load --run`: the user reads it
+first.
 
 - Run those commands in the background: each waits for the user.
 - The machine must reach both instances (VPN), and the browser must run on this machine.
@@ -70,8 +73,7 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 | 5 | `extract W` | source | `extract/` |
 | 6 | `load W` (dry run; repeat until 0 failed) | target | `reports/plan.md` only |
 | 7 | `load W --run --limit 20` (pilot), after the user's yes | target | target records |
-| 8 | `load W --run`, after the user checked the pilot and said yes | target | target records |
-| 9 | `verify W` | target | `reports/verify.md` |
+| 8 | `load W --run --then verify`, after the user checked the pilot and said yes | target | target records, `reports/verify.md` |
 
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →

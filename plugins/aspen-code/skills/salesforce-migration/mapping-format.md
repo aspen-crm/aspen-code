@@ -69,14 +69,21 @@ read it:
 expects. `where` is optional. `migrate.mjs` ignores `sfMatch`; only `sfmigrate extract` reads it.
 
 A match lookup without `sfMatch` extracts nothing, and `load` reports every row as missing the
-referenced record.
+referenced record — unless the Salesforce value is itself the thing to match (`"by": "value"`):
+
+```json
+{ "target": "ccode_p", "from": "CurrencyIsoCode", "map": { "USD": "usd_p", "EUR": "eur_p" },
+  "lookup": { "object": "currency_p", "match": "currency_code_p", "by": "value" } }
+```
 
 ## Picklists
 
 Salesforce picklist values are labels like `Biotechnology`; Aspen's are names like `biotech_p`.
-`draft` seeds `map` with the values that exist verbatim on the target picklist and lists the rest
-in the `todo`, so almost every Salesforce picklist needs a `map` the user confirms value by value.
-`default` applies to anything not in the table; without it, an unmapped value fails the row.
+`draft` seeds `map` with each value that matches a target item's name or label, ignoring case, and
+lists the rest in the `todo`. An object-dependent picklist (`dependsOn` in `schema/target.json`,
+such as `team_role_p`) is seeded only with the items its parent object allows, so
+`AccountTeamMember` and `OpportunityTeamMember` get different maps. `default` applies to anything
+not in the table; without it, an unmapped value fails the row.
 
 ## Conversions `load` already does
 

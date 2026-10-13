@@ -82,7 +82,7 @@ remove.
 
 `<source>` is the one you picked in step 1.
 
-**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.10 or
+**Check:** `claude plugin list` (or `codex plugin list`) shows `aspen-code@aspen-code` at 0.0.11 or
 later, enabled.
 
 Already installed? Update it. Each release carries a new version number, which is what an update
