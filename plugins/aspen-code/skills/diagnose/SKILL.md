@@ -1,27 +1,25 @@
 ---
 name: diagnose
-description: Use when an Aspen compile, check-in, or the instance behaves unexpectedly — a compile that fails on components you did not touch, a failed checkin-prep, a phase that seems to name nothing, a CLI/instance version mismatch, a login or reachability error, a trigger that does not fire. Reproduce and find the root cause before any fix.
+description: Use when an Aspen compile, check-in, or the instance behaves unexpectedly — a compile that fails on components you did not touch, a failed checkin-prep, a phase that seems to name nothing, a CLI/instance version mismatch, a login or reachability error, a trigger that does not fire.
 ---
 
 # Diagnose
 
-No fix without a reproduction and a cause. Route on what the CLI actually printed — never on a
-remembered or invented error.
+Reproduce and find the cause before any fix, routing on what the CLI actually printed.
 
 ## The loop
 
-1. **Reproduce.** Re-run the failing command and capture all of it to a file:
-   `aspen <command> > /tmp/aspen.out 2>&1`. Don't read a long failure in the terminal — a
-   truncated view shows the cascade and hides the cause.
-2. **Gather.** `aspen doctor` (every readiness check, JSON under an agent) and `aspen status`
-   (check-in state, pending package, code override, checked-in code). Both are cheap and answer
-   most "why" questions before you theorize.
+1. **Reproduce.** Re-run the failing command and capture all of it:
+   `aspen <command> > /tmp/aspen.out 2>&1`. A truncated terminal view shows the cascade and hides
+   the cause.
+2. **Gather.** `aspen doctor` (every readiness check) and `aspen status` (check-in state, pending
+   package, code override, checked-in code) answer most "why" questions.
 3. **Localize.** Drop the cascade and read what is left:
    ```sh
    grep -vE 'skipped due to other errors|another component failed validation' /tmp/aspen.out
    ```
-   One bad component fails the whole batch; every other one reports it was skipped. Fix **every**
-   cause the filtered output names before re-running — each check-in round trip costs the shared
+   One bad component fails the whole batch and every other reports it was skipped. Fix every cause
+   the filtered output names before re-running — each check-in round trip costs the shared
    instance.
 4. **Smallest change, re-run,** confirm the error is gone.
 5. **Record the lesson** if it was non-obvious (below).
@@ -30,38 +28,30 @@ remembered or invented error.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `aspen compile --metadata` fails on components you never touched, with "supplied active metadata failed validation; pending components were not validated" | Version skew: the CLI's validator is a different release from the instance, so the instance's own `active/` components fail it | `aspen doctor` → `instance.cli-matches-instance`. Run the CLI through aspenup, which installs the toolchain the instance serves (`aspenup update`). If aspenup warns that nothing is published for that release, the CLI cannot match the instance — tell the human; don't work around it |
-| Doctor: `configuration.record-matches-login` problem; `move`/`status` refuse | Signed in to another instance (one login at a time) | Tell the user it replaces the current login, then sign in to this directory's instance — `getting-started` §2 |
-| The guard refuses "`aspen move …` is not running in an instance folder" | The command's directory has no `.aspen/config.toml`, so it would act on whatever instance is logged in | Run it from the instance directory (`cd <dir> && …`); the `move` verbs take no `--dir` |
-| The guard asks "targets … a different instance folder" | The command left the session's instance directory | Only proceed if the user asked for that folder; in Codex, after they confirm, prefix `ASPEN_CODE_CONFIRMED=1` |
-| `aspen login` says "Interactive login is not supported" | It ran under an agent, or with no terminal, without the overrides | Run it in the `getting-started` §2 shape (`ASPEN_INTERACTIVE=1 … --agent no --credential-store keyring`). Never `--api-key` |
-| A custom page shows "Version … of the "sdk" SDK is no longer supported. Please upgrade the SDK and redeploy." | `typescript/` is built against `@aspen-crm/sdk` 0.1.0, which `aspen init` 26.4.1 pins. It has no token snapshot, and the 26.4.1 SDK (0.2.0) is not published | Tell the human: it needs SDK 0.2.0 on npm. Don't change the pins or point them at an x-platform checkout |
-| Check-in refuses the server component: "query-service@0.1.0 … no matching implementation in the linker" | *Observed on a live instance:* crates.io `aspen-crm` 0.1.0, which `aspen init` 26.4.1 pins, predates a record-value case the 26.4.1 host has. Both are labelled 0.1.0, so nothing catches it before check-in | Tell the human: it needs an `aspen-crm` release that matches 26.4.1. Don't patch the crate to an x-platform checkout |
-| "Operation Save is not allowed" on `save-package` | A previous package is still in flight | `aspen status`, then the recovery order in `build-and-deploy` §4 — with go-ahead |
-| `save-package` warns to "run `aspen compile --rust`/`--typescript` first" | That code was not built, so it was left out | Compile, then save again |
-| Rust: componentization error naming wit-bindgen, "invalid leading byte" | The `rust/rust-toolchain.toml` pin is missing or changed | Restore it — `rust-trigger-notes.md` |
+| `aspen compile --metadata` fails on components you never touched: "supplied active metadata failed validation; pending components were not validated" | Version skew: the CLI's validator is another release than the instance, so its own `active/` fails | `aspen doctor` → `instance.cli-matches-instance`; `aspenup update` installs the toolchain the instance serves. If aspenup says nothing is published for that release, tell the human; don't work around it |
+| Doctor: `configuration.record-matches-login`; `move`/`status` refuse | Signed in to another instance (one login at a time) | Tell the user it replaces the current login, then `getting-started` step 2 with this directory's URL |
+| `aspen login`: "Interactive login is not supported" | Run under an agent without the overrides | The `getting-started` step 2 shape. Never `--api-key` |
+| A custom page: "Version … of the "sdk" SDK is no longer supported. Please upgrade the SDK and redeploy." | Built against the `@aspen-crm/sdk` 0.1.0 `aspen init` pins (`using-aspen` known issues) | Tell the human it needs SDK 0.2.0 published; don't change the pins |
+| Check-in refuses the server component: "query-service@0.1.0 … no matching implementation in the linker" | crates.io `aspen-crm` 0.1.0 predates the 26.4.1 host (`using-aspen` known issues) | Tell the human it needs a matching `aspen-crm` release; don't patch the crate |
+| "Operation Save is not allowed" on `save-package` | A previous package is still in flight | `aspen status`, then `build-and-deploy` step 4 — with go-ahead |
+| `save-package` warns to "run `aspen compile --rust`/`--typescript` first" | That code wasn't built, so it was left out | Compile, then save again |
+| Rust: componentization error naming wit-bindgen, "invalid leading byte" | The `rust/rust-toolchain.toml` pin is missing or changed | Restore it (`server-code`'s `rust-trigger-notes.md`) |
 | Rust: `--locked` failure after adding a dependency | `Cargo.lock` not updated | `cd rust && cargo update -p <crate>`, commit the lock |
-| A trigger that "does nothing" | Usually still running, with a `match` arm swallowing the case | `rust-trigger-notes.md` → "Debugging a trigger", in order |
+| A trigger that "does nothing" | Usually running, with a `match` arm swallowing the case | `rust-trigger-notes.md` → "Debugging a trigger", in order |
 | Instance unreachable, 404 from `status` | Wrong URL, instance down, or network | `aspen doctor` → `instance.reachable`; confirm the URL with the human |
 
-## Anti-patterns
+## Don't
 
-- Guessing a fix before reproducing.
-- **Re-running a check-in to "see if it passes"** — the last one may still be applying. `aspen
-  status` first.
-- Clearing or halting the shared check-in as generic recovery — it wipes other builders' work.
-- Inventing a cause for a failure that seems to name none: filter the cascade and read again.
-- Editing `metadata/active/` or `platform/` to make a compile pass — they are replaced on the next
-  fetch and prove nothing.
+- Re-run a check-in "to see if it passes" — the last one may still be applying. `aspen status`
+  first.
+- Clear or halt the shared check-in as generic recovery; it wipes other builders' work.
+- Edit `metadata/active/` or `platform/` to make a compile pass; they are replaced on the next
+  fetch.
 
-## Lessons (kept small)
+## Lessons
 
-After resolving a **non-obvious** failure, add **one terse line** to a `## Lessons` section in
-the instance directory's `CLAUDE.md` (below its `@./AGENTS.md` import; `aspen init` never
-overwrites it): `symptom → root cause → fix`. It is committed, so every teammate's agent inherits
-it and a wrong one dies in review.
-
-- Deduplicate first. Hard cap ~15 lines; prune the least useful at the cap.
-- Never per-user memory — the committed file is the point.
-- A lesson true of the **platform**, not just this instance, also belongs in this plugin: tell the
-  human to raise it on `aspen-crm/aspen-code`.
+After resolving a non-obvious failure, add one line — `symptom → root cause → fix` — to a
+`## Lessons` section in the instance directory's `CLAUDE.md`, below its `@./AGENTS.md` import
+(`aspen init` never overwrites it). It is committed, so every teammate's agent inherits it.
+Deduplicate first and keep it under ~15 lines, pruning the least useful. A lesson true of the
+platform also belongs in this plugin: tell the human to raise it on `aspen-crm/aspen-code`.

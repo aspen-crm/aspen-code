@@ -1,68 +1,53 @@
 ---
 name: getting-started
-description: Use when the aspen CLI is not installed or out of date, not signed in, signed in to the wrong instance, there is no instance directory yet, or its build dependencies (Rust toolchain, crates, Node, npm packages) are missing — on a fresh machine, a first session, or when the session-start note says so. Installs or updates the CLI (with consent), runs the OAuth sign-in the user approves in the browser, creates the instance directory with aspen init, installs its dependencies, and checks it with aspen doctor.
+description: Use when the aspen CLI is missing or out of date, not signed in or signed in to the wrong instance, there is no instance directory yet, or its build dependencies (Rust toolchain, crates, Node, npm packages) are missing — a fresh machine, a first session, or when the session-start note says so.
 ---
 
 # Getting started
 
-Six steps, each ending in a check you run. Do them in order and stop at the first one that is
-already done — the session-start note usually says which.
+Six steps, each ending in a check. Start at the first one not yet done; the session-start note
+usually says which.
 
 ## 1. Install or update the CLI — with consent
 
-**Already installed? Update it, don't skip it** — a found CLI is often behind the promoted release:
+**Installed already: update it**, since a found CLI is often behind the promoted release:
 
 ```sh
-aspenup self update     # the launcher → the promoted release; prints "already the promoted release" when current
+aspenup self update     # the launcher → the promoted release ("already the promoted release" when current)
 aspenup update          # in an instance directory: the aspen toolchain that instance serves
 ```
 
-The launcher and the toolchain are separate. `self update` never changes which `aspen` runs; in
-an instance directory the proxy runs the toolchain that instance serves, and `aspenup update`
-refreshes that answer. Don't install a newer toolchain than the instance serves — that is the
-mismatch `aspen doctor` reports as `instance.cli-matches-instance`. Say what changed (the versions
-before and after), then go to step 2.
+`self update` never changes which `aspen` runs; in an instance directory the proxy runs the
+toolchain that instance serves. Don't install a newer toolchain than the instance serves — that is
+the `instance.cli-matches-instance` mismatch. Report the versions before and after, then step 2.
 
-Not installed:
+**Not installed:** the CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and
+later fetches each instance's toolchain, always from the environment it was installed from. So
+install from the instance's environment: `<cdn>` = `https://static-assets.<app domain>`, the app
+domain being the last two labels of the instance host (`https://abc.aspen-crm2.com/acme.com/dev` →
+`https://static-assets.aspen-crm2.com`). Ask for the instance URL if you don't have it; for a
+custom-domain host, ask for their `static-assets.` host. An existing install whose `aspenup show`
+prints another `cdn:` can't serve this instance — tell the user and, with consent, reinstall.
 
-The CLI ships as **aspenup**, a launcher that installs `aspen` and `aspenc` and later fetches the
-toolchain each instance serves — always from the environment it was installed from. So install it
-from **the instance's environment**: `<cdn>` = `https://static-assets.<app domain>`, the app domain
-being the last two labels of the instance URL's host (`https://abc.aspen-crm2.com/acme.com/dev` →
-`https://static-assets.aspen-crm2.com`). Ask for the instance URL first if you don't have it; for a
-custom-domain host, ask the user for their environment's `static-assets.` host.
-
-An existing install from another environment can't serve this instance: `aspenup show` prints its
-`cdn:`. If that isn't `<cdn>`, tell the user and, with consent, re-run the installer below.
-
-Tell the user what it does (downloads from `<cdn>`, filled in; installs to `~/.aspen`) and **ask
-before running it**, with `<cdn>` filled in:
-
-macOS / Linux:
+Say what it does (downloads from `<cdn>`, installs to `~/.aspen`) and **ask before running it**:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
-Windows (PowerShell):
-
 ```powershell
 irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
 ```
 
-`-y` skips the installer's own confirmation, which cannot be answered from your shell — the user's
-consent to you is the confirmation. `--no-modify-path` leaves the user's shell profile alone: that
-file is theirs to change, not yours.
-
-**If the host blocks it** (a permission prompt the user declines, or a security classifier), stop
-— no workarounds. Hand them the command for their OS and say: *run this in a terminal (VS Code:
-Terminal → New Terminal), then tell me when it finishes.*
+`-y` answers the installer's own prompt (the user's consent to you is the confirmation);
+`--no-modify-path` leaves the shell profile to the user. If the host blocks the command, don't work
+around it: give the user the command for their OS to run in a terminal and wait for them.
 
 **Check:** `~/.aspen/bin/aspen --version` (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
 This session's PATH predates the install, so use that full path for the rest of the session.
 
-**Then ask the user to put it on their PATH.** Never edit a shell profile yourself. Give them the
-line for their shell to add in their own editor; new terminals then find `aspen`:
+Then give the user the line to add to their shell profile (never edit it yourself); the full path
+works without it:
 
 | Shell | File | Line |
 |---|---|---|
@@ -71,136 +56,97 @@ line for their shell to add in their own editor; new terminals then find `aspen`
 | fish | `~/.config/fish/config.fish` | `source "$HOME/.aspen/env.fish"` |
 | PowerShell | user `Path` | the change the installer printed |
 
-If they would rather not, the full path works everywhere.
-
 ## 2. Sign in — you run it, the user approves in the browser
 
 `aspen login` is OAuth in a browser. Under an agent it refuses ("Interactive login is not
-supported (an agent is driving this invocation)") unless told the user is there to approve:
-`--agent no` overrides the agent detection for that one command, and `ASPEN_INTERACTIVE=1` the
-terminal detection. **Never pass `--api-key`/`-k`** — this plugin never handles a secret. The
-guard hook refuses any other shape of `aspen login`.
+supported (an agent is driving this invocation)") unless told the user is there: `--agent no`
+overrides the agent detection for that command, `ASPEN_INTERACTIVE=1` the terminal detection.
+Never pass `--api-key`/`-k`; the guard hook refuses any other shape of `aspen login`.
 
-Ask for the instance URL if you do not have it — it looks like
-`https://<host>/<domain>/<instance>`, the address of the instance in the browser minus anything
-after the instance name. Tell the user: *a browser will open — sign in to the instance and
-approve.* Then run it, filled in, with a timeout of at least 6 minutes (the CLI waits up to 5 for
-the approval). Use the full path from step 1 if `aspen` is not on this session's PATH.
-
-macOS / Linux:
+The instance URL looks like `https://<host>/<domain>/<instance>` (the browser address minus
+anything after the instance name). Tell the user a browser will open for them to sign in and
+approve, then run it with a timeout of at least 6 minutes (the CLI waits up to 5):
 
 ```sh
 ASPEN_INTERACTIVE=1 aspen login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring
 ```
 
-Windows (PowerShell):
-
 ```powershell
 $env:ASPEN_INTERACTIVE='1'; aspen login -i https://<host>/<domain>/<instance> --agent no --credential-store keyring; Remove-Item Env:ASPEN_INTERACTIVE
 ```
 
-- **The browser didn't open:** the CLI prints "Open this URL to log in…". Give the user that URL;
-  it carries no secret.
-- **"Login succeeded"** ends it. The token goes from the browser to the CLI and the OS keyring;
-  you never see it. Don't add `--debug`.
-- **No keyring** (a headless Linux box): `--credential-store keyring` fails rather than ask about
-  a file, a question you cannot answer. Hand the user `aspen login -i <url>` to run in their own
-  terminal (VS Code: **Terminal → New Terminal**), where the CLI can ask them, and wait for "Login
-  succeeded".
+- **No browser opened:** give the user the "Open this URL to log in…" URL it printed; it holds no
+  secret.
+- **"Login succeeded"** ends it; the token went to the OS keyring. Don't add `--debug`.
+- **No keyring** (headless Linux): it fails rather than ask about a file. Have the user run
+  `aspen login -i <url>` in their own terminal, where the CLI can ask them.
 - **Denied or timed out:** say so and offer to run it again.
 
-The CLI holds **one login at a time** — signing in to another instance replaces the current one.
-Say so before you sign in while it is signed in elsewhere.
+The CLI holds one login at a time; say so before signing in while it is signed in elsewhere.
 
 **Check:** `aspen doctor` in the instance directory reports `instance.logged-in` and
-`instance.credential-accepted` as `ok`. Before a directory exists, read the `instance` field of
-`~/.config/aspen/credentials.json` (Windows: `%APPDATA%\aspen\credentials.json`) — it names the
-instance, and holds no secret unless the user chose file storage. Read only that field.
+`instance.credential-accepted` as `ok`. Before a directory exists, read only the `instance` field
+of `~/.config/aspen/credentials.json` (Windows: `%APPDATA%\aspen\credentials.json`).
 
 ## 3. Create the instance directory — `aspen init`
 
-What it creates is in the *Aspen CLI Developer Guide* (`aspen-docs`). What matters here:
-
-- It needs the login, and it creates the directory, named after the instance, **under** the one
-  you give it. **Ask where it should go** (e.g. `~/Aspen`), then `aspen init --dir ~/Aspen`, which
-  creates `~/Aspen/<domain>_<instance>` — `<dir>` in the steps below.
-- It refuses only when that instance-named folder already holds files and no
-  `.aspen/config.toml`; the parent may hold anything. It never overwrites a file you authored. Run
-  again from **inside** an instance directory, it completes a fresh clone or refreshes the fetched
-  `platform/` and `active/` layers.
-- Don't move the session there yet. Steps 4 and 5 take `<dir>` as an argument, and step 6 moves
-  it.
+It needs the login and creates a folder named after the instance **under** the directory you give
+it. Ask where (e.g. `~/Aspen`), then `aspen init --dir ~/Aspen`, which creates
+`~/Aspen/<domain>_<instance>` — `<dir>` below. It refuses only when that folder already holds files
+and no `.aspen/config.toml`, and never overwrites a file you authored; run again from inside an
+instance directory, it completes a fresh clone or refreshes `platform/` and `active/`. The layout
+is in the *Aspen CLI Developer Guide* (`aspen-docs`). Stay where you are until step 6.
 
 **Check:** `.aspen/config.toml` names the instance you signed in to.
 
-## 4. Install the project's dependencies — right after `aspen init`
+## 4. Install the project's dependencies
 
 `aspen init` installs nothing. Building needs the Rust toolchain the crate pins (with
-`wasm32-wasip2`) and its crates, and a Node that satisfies the UI tooling (`^24.11.1`, npm
-`^11.6.2`) plus `typescript/`'s packages. The bundled script does all of it. Resolve it from the
-absolute directory holding this `SKILL.md`, and pass it the instance directory (it defaults to the
-one the working directory sits in):
+`wasm32-wasip2`) and its crates, and Node `^24.11.1` / npm `^11.6.2` plus `typescript/`'s
+packages. The bundled script, resolved from this skill's directory, does all of it:
 
 ```sh
-node "<this skill's dir>/scripts/install-deps.mjs" <dir>             # the plan; changes nothing
-node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run       # install the project's dependencies
+node "<this skill's dir>/scripts/install-deps.mjs" <dir>                   # the plan; changes nothing
+node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run             # the project's dependencies
 node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run --machine   # also rustup / Node for this user
 ```
 
-1. **Show the user the plan** and ask to install. It has two kinds of step, and they need
-   separate consent:
-   - *project* — a pinned Rust toolchain, `cargo fetch --locked`, and `npm ci`/`npm install` in
-     `typescript/`: writes inside the instance directory and the user's package caches.
-   - *machine* — rustup (rustup.rs, or winget on Windows) and Node (via nvm, fnm, winget or
-     Homebrew, whichever is present): installs a tool for the user. Name the tool and how.
-2. **Run it** with `--run`, adding `--machine` only when the user agreed to the machine steps.
-   Exit 0 means everything is installed; 3 means it stopped at a machine step it was not allowed to
-   do (or one it cannot do, printed as `manual` — hand the user that one); 1 means a step failed.
-3. **npm registry.** The script installs from public npm (`registry.npmjs.org`), where the Aspen
-   packages are, whatever the user's `.npmrc` names — so a corporate mirror they are not signed in
-   to doesn't matter. Don't edit the user's `.npmrc`. If npm fails, the result says why: a
-   network that only reaches a mirror → re-run with `--configured-registry`; a `package-lock.json`
-   resolved through a mirror → ask, then delete it and `typescript/node_modules` and re-run.
-4. `npm install` writes `typescript/package-lock.json` the first time — suggest committing it.
-5. On macOS/Linux rustup installs with `--no-modify-path`. If the run installed it, ask the user to add
-   `. "$HOME/.cargo/env"` to their shell profile (fish: `source "$HOME/.cargo/env.fish"`); never edit
-   it yourself. A tool installed during the run is never on this session's PATH, and the script finds
-   rustup in `~/.cargo/bin` itself. On Windows, Rust also needs the Visual Studio C++ Build Tools —
-   the script cannot install those; say so.
+1. **Show the user the plan.** Its two kinds of step need separate consent: *project* (pinned Rust
+   toolchain, `cargo fetch --locked`, `npm ci`/`npm install` in `typescript/`) and *machine*
+   (rustup via rustup.rs or winget; Node via nvm, fnm, winget or Homebrew — name the tool and how).
+2. **Run it** with `--run`, plus `--machine` only if the user agreed to those steps. Exit 0: all
+   installed; 3: stopped at a machine step it wasn't allowed to do, or one printed `manual` (hand
+   that to the user); 1: a step failed.
+3. **npm** installs from public `registry.npmjs.org` whatever the user's `.npmrc` says; never edit
+   `.npmrc`. If npm fails: a network that reaches only a mirror → `--configured-registry`; a
+   `package-lock.json` resolved through a mirror → ask, then delete it and `typescript/node_modules`
+   and re-run.
+4. The first `npm install` writes `typescript/package-lock.json` — suggest committing it.
+5. rustup installs with `--no-modify-path`; if the run installed it, ask the user to add
+   `. "$HOME/.cargo/env"` to their profile (fish: `source "$HOME/.cargo/env.fish"`). The script
+   finds rustup in `~/.cargo/bin` itself. On Windows, Rust also needs the Visual Studio C++ Build
+   Tools, which the script can't install; say so.
 
 ## 5. Check the directory — `aspen doctor`
 
 ```sh
-aspen doctor --dir <dir>   # JSON under an agent; one {id, section, status, message, fix?} per finding
+aspen doctor --dir <dir>   # one {id, section, status, message, fix?} per finding
 ```
 
-Exit 1 means at least one `problem`. After step 4 every `toolchain.*`, `rust.*` and
-`typescript.*` check should be `ok`, except two warnings that stay until the first build:
-`rust.component-built` and `typescript.bundle-built`. If a dependency check still fails, re-run the
-script — it re-checks and does only what is missing.
+After step 4 every `toolchain.*`, `rust.*` and `typescript.*` check is `ok` except
+`rust.component-built` and `typescript.bundle-built`, which warn until the first build. A failing
+dependency check: re-run the script, which does only what is missing. Stop and tell the user on:
 
-Not fine, stop and tell the user:
-
-- `instance.cli-matches-instance` — the CLI and the instance are on different releases. See
-  `diagnose` → version skew.
-- `configuration.record-matches-login` — signed in to a different instance than this directory's.
-  Back to step 2 with this directory's URL.
+- `instance.cli-matches-instance` — CLI and instance on different releases (`diagnose`).
+- `configuration.record-matches-login` — signed in to another instance; back to step 2 with this
+  directory's URL.
 
 ## 6. Move into the new directory
 
-Only when step 3 created a new instance directory. Every `aspen` command runs from inside it, so
-`cd <dir>` — don't ask — and tell the user the session is now there. Suggest `git init` and a
-first commit.
+Only when step 3 created one: `cd <dir>`, tell the user the session is there, and suggest
+`git init` and a first commit. **Check:** `pwd` in a separate command prints `<dir>`. If not, the
+host keeps the session where it started (Claude Code does when `<dir>` is outside it): ask the user
+to reopen the host in `<dir>` before building.
 
-**Check:** `pwd` in a separate command prints `<dir>`. If it doesn't, the host keeps the session
-in the folder it started in (Claude Code does when `<dir>` is outside it): tell the user to
-reopen the host in `<dir>` (VS Code: **File → Open Folder**) before building.
-
-Then hand off to `using-aspen`.
-
-## Safety
-
-- Consent before installing, and before anything that writes to the instance.
-- Never type, echo, ask for, or read a credential.
-- Components created while testing can't be deleted yet. On a shared instance, keep them few and
-  clearly named.
+Then `using-aspen`. Components created while testing can't be deleted yet: on a shared instance,
+keep them few and clearly named.

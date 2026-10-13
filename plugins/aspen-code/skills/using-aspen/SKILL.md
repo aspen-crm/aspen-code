@@ -1,150 +1,110 @@
 ---
 name: using-aspen
-description: Use for ANY change to an Aspen instance with the aspen CLI — authoring or extending objects, fields, picklists, layouts, list views, tabs, writing a Rust record trigger or web API, compiling, deploying through the check-in chain, verifying, and migrating records from another instance. Routes each moment of the loop to the right skill, in order. Start here.
+description: Use first for any change to an Aspen instance with the aspen CLI — metadata (objects, fields, picklists, layouts, list views, tabs), a Rust trigger or web API, a TypeScript page, compiling, deploying, verifying, or migrating records in. Routes each step to the skill that owns it.
 ---
 
 # Building on Aspen
 
-You build one instance's **metadata** and **Rust server code** on this machine with the `aspen`
-CLI; the **instance validates and deploys** what it is given. There is one loop, and every step
-has a skill. Announce it: "Using [skill] to [purpose]."
+You author one instance's metadata, Rust server code and TypeScript UI on this machine with the
+`aspen` CLI; the instance validates and deploys what it is given.
 
-## Before the loop: is this machine ready?
+## Is this machine ready?
 
-Four facts, in this order. The session-start note states them when hooks are on; otherwise check:
+The session-start note says what is missing. Without hooks, check:
 
-| Fact | How to tell | If not |
+| Fact | Check | If not |
 |---|---|---|
-| The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` §1 |
-| It is signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` §2 — you run `aspen login`, the user approves in the browser |
-| You are in that instance's directory | a `.aspen/config.toml` here or above | `getting-started` §3 — `aspen init` |
-| Its build dependencies are installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` §4 — `install-deps.mjs` |
+| The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` step 1 |
+| Signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` step 2 |
+| In that instance's directory | `.aspen/config.toml` here or above | `getting-started` step 3 |
+| Build dependencies installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` step 4 |
 
-Then run **`aspen doctor`** once in the instance directory. It is the CLI's own readiness report
-(JSON when an agent runs it, one `id` + `status` per finding, exit 1 only on a `problem`). Fix
-every `problem` before authoring; read the `fix` it gives — except `instance.logged-in` and
-`instance.credential-accepted`, whose fixes name `--api-key`: sign in with OAuth instead, in the
-shape `getting-started` §2 gives.
-`instance.cli-matches-instance` failing means
-the CLI and the instance are on different releases — nothing will compile or deploy correctly
-until that is resolved (see `diagnose`).
-
-## Pinned to x-platform 26.4.1
-
-These skills are verified against x-platform **26.4.1** ([`xplatform.json`](../../xplatform.json)):
-the `aspen` CLI 26.4.1 and its metadata validator, App API v24.3, Rust 1.98.1 to `wasm32-wasip2`,
-the `aspen-crm` crate 0.1.0, and `@aspen-crm/sdk` / `@aspen-crm/x-cli` 0.2.0. A fact marked
-*observed on a live instance* was not checkable in source. When the instance serves another
-release (the session-start note says so), `aspen <command> --help`, `aspen doctor` and the
-installed SDK win over any skill.
-
-**The 26.4.1 SDKs are not published.** `aspen init` 26.4.1 pins `aspen-crm`, `@aspen-crm/sdk`
-and `@aspen-crm/x-cli` to `0.1.0`, the only versions on crates.io and npm, all built for the
-previous release:
-
-- A 26.4.1 instance refuses to render a page built against `@aspen-crm/sdk` 0.1.0 ("… SDK is no
-  longer supported").
-- crates.io `aspen-crm` 0.1.0 lacks a record-value case the 26.4.1 host has, under the same
-  `0.1.0` label. A component that queries has been refused at check-in for it (*observed on a
-  live instance*).
-
-Tell the human before building either. Don't change the pins, and don't point them at an
-x-platform checkout. `diagnose` has the symptoms.
-
-## The directory and the reference
-
-`aspen init` wrote the directory; its `AGENTS.md` (imported by `CLAUDE.md`) and the docs page
-*Managing Component Files* describe the layout. In one line: author metadata only in
-`metadata/custom/` (the `platform/`, `active/` and `compiled/` layers are replaced by the next
-fetch or compile), server code in `rust/`, UI in `typescript/`.
-
-The **Aspen docs** are the reference, shipped as the `aspen-docs` MCP server —
-`searchDocumentation`, then `getPage` on the URL it returns (fallback: any page URL + `.md`, or
-`https://aspencrm.gitbook.io/docs/llms.txt`). If neither is reachable, tell the user and have
-them authorize `aspen-docs` (`/mcp`) before you author anything. They cover every component type (Platform), the CLI
-(*Aspen CLI Developer Guide*, *Command Reference*), the Rust SDK, AQL, and the REST API. Skills
-here carry the loop and what the docs leave out. When sources disagree: the CLI (`--help`, and
-what it actually does) and the compiler first, then real components in `metadata/active/` and
-`platform/`, then the docs, then a skill — and say which was wrong so it gets fixed.
-
-### Where the docs are wrong for CLI 26.4.1 — follow this, not the page
-
-| The docs say | Actually |
-|---|---|
-| Log in with `aspen login -i <url> -k <api-key>` | `-k` still exists, but this plugin never uses an API key. Without it, `aspen login -i <url>` is OAuth in a browser; under an agent it needs `--agent no` and `ASPEN_INTERACTIVE=1` (`getting-started` §2). |
-| `aspen download aspenc` fetches the validator | No `download` command exists. aspenup installs `aspenc` with `aspen`; `aspen compile --metadata` runs it. |
-| `aspen move --rust --dev` for fast Rust iteration | It looks for code in `server/` and `ui/`, not the `rust/` and `typescript/` that `aspen init` creates. Deploy code through the check-in chain until that is fixed. |
-| A `custom_page` tab's `page-ui-code` is a URL template | The form that passed check-in is `ui_main_c.<route name>` (see `metadata/metadata-shapes.md`). |
-| The Query Service example formats a value into the AQL string | Fine for constants and ids; never for request-supplied text. |
+Then run `aspen doctor` once in the instance directory (JSON under an agent, one `id` + `status`
+per finding, exit 1 only on a `problem`) and fix each `problem` with the `fix` it gives — except
+`instance.logged-in` and `instance.credential-accepted`, whose fixes name `--api-key`: sign in as
+`getting-started` step 2 says instead. A failing `instance.cli-matches-instance` means nothing will
+compile or deploy correctly until it is resolved (`diagnose`).
 
 ## The loop
 
 | # | Moment | Skill |
 |---|---|---|
 | 0 | Machine not ready: install, sign in, create the instance directory | `getting-started` |
-| 1 | The request **creates** an object, field, picklist, record type, tab or collection | `lean-data-model` — should it exist at all? |
-| 2 | Any feature, number, rule, status flow, screen | `model-first` — which tier: metadata, trigger, or page |
-| 3 | Authoring metadata into `metadata/custom/` | `metadata` |
-| 4 | Writing a Rust record trigger or web API in `rust/` | `server-code` |
-| 4b | Writing or restyling a page or layout section in `typescript/` | `custom-ui` — where it goes, design tokens and components, the rendered-UI checks |
+| 1 | The request creates an object, field, picklist, record type, tab or collection | `lean-data-model` |
+| 2 | A feature, number, rule, status flow or screen | `model-first` |
+| 3 | Authoring metadata in `metadata/custom/` | `metadata` |
+| 4 | A Rust record trigger or web API in `rust/` | `server-code` |
+| 4b | A page or layout section in `typescript/` | `custom-ui` |
 | 5 | Compile, deploy through the check-in chain, prove it with a record round-trip | `build-and-deploy` |
 | — | A compile, check-in, or the instance behaves unexpectedly | `diagnose` |
-| — | Move records (and the objects and fields they need) from another Aspen instance into this one | `instance-migration` |
-| — | Move records from a **Salesforce** org into this instance: map its objects onto this data model, report the gaps and ETLs, extract and load | `salesforce-migration` |
+| — | Records (and the objects and fields they need) from another Aspen instance | `instance-migration` |
+| — | Records from a Salesforce org | `salesforce-migration` |
 
-Steps 1 and 2 happen **before the first file**. Metadata can't be deleted yet, so they are only
-cheap now. Skip them only when the tier is already settled: fixing a field you authored last turn,
-a trigger's logic, a label.
+Steps 1 and 2 come before the first file, while they are cheap: metadata can't be deleted yet.
+Skip them when the tier is settled — a label, one picklist item, fixing what you authored last
+turn — and go straight to `metadata`.
 
-Editing **one** existing component (a label, one picklist item)? Go straight to `metadata` step 1:
-copy the shape, change it, compile.
+Read-only subagents: `schema-explorer` answers a model-shape question across many objects;
+`metadata-reviewer` audits a non-trivial metadata diff before deploy.
 
-## Fan-out (read-only subagents)
+## Rules
 
-| Moment | Agent |
+- **`aspen <command> --help` and the compiler are the authority** on the CLI. When a skill
+  disagrees, follow the CLI and tell the human the skill needs fixing in `aspen-crm/aspen-code`.
+- Run every `aspen` command from the session's instance directory (`cd <dir> && …`; only
+  `compile`, `doctor` and `init` take `--dir`, and `move save-package --dir` names a package). A
+  guard hook checks the binary, folder and instance of each command; follow what it says.
+- **Never handle a credential.** No `--api-key`/`-k`. You run the OAuth login in the shape
+  `getting-started` step 2 gives, the user approves in the browser, and the token goes to the OS
+  keyring. You never see, ask for or print a token.
+- Choose an object or field by its `description`, not its name: `contact_rel_p` is a team
+  member's relationship strength with a contact; `contact_role_p` links a contact to a record.
+  Read it in `metadata/platform/object_p/<name>.json` (or the describe); ask when none fits.
+- Metadata can't be deleted yet. Retire with `"active": false`; never delete a deployed file.
+- Deploying and the recovery verbs change a shared instance: get the human's go-ahead
+  (`build-and-deploy`). "Deployed" is done only after a record round-trip proves the behavior.
+- A platform fact a compile or check-in taught you that no skill states belongs in this plugin:
+  tell the human, and add a lesson to the instance repo (`diagnose`).
+
+## The directory and the reference
+
+The instance directory's `AGENTS.md` (written by `aspen init`, imported by `CLAUDE.md`) owns the
+layout. Author metadata only in `metadata/custom/` (`platform/`, `active/` and `compiled/` are
+replaced by the next fetch or compile), server code in `rust/`, UI in `typescript/`.
+
+The Aspen docs are the reference for every component type, the CLI, the Rust SDK, AQL and the REST
+API, through the `aspen-docs` MCP server: `searchDocumentation`, then `getPage` on the URL it
+returns (fallback: the page URL + `.md`, or `https://aspencrm.gitbook.io/docs/llms.txt`). If
+neither is reachable, ask the user to authorize `aspen-docs` (`/mcp`) rather than authoring from
+memory. When sources disagree: the CLI and compiler, then real components in `metadata/active/`
+and `platform/`, then the docs, then a skill.
+
+## Known issues at the pinned release
+
+These skills are verified against x-platform **26.4.1** ([`xplatform.json`](../../xplatform.json)):
+the `aspen` CLI 26.4.1 and its metadata validator, App API v24.3, Rust 1.98.1 to `wasm32-wasip2`,
+the `aspen-crm` crate 0.1.0, and `@aspen-crm/sdk` / `@aspen-crm/x-cli` 0.2.0. *Observed on a live
+instance* marks a fact not checkable in source. When the instance serves another release (the
+session-start note says so), `--help`, `aspen doctor` and the installed SDK win over any skill.
+
+**The 26.4.1 SDKs are not published.** `aspen init` 26.4.1 pins `aspen-crm`, `@aspen-crm/sdk` and
+`@aspen-crm/x-cli` to `0.1.0`, the only versions on crates.io and npm, built for the previous
+release:
+
+- A 26.4.1 instance refuses to render a page built against `@aspen-crm/sdk` 0.1.0 ("… SDK is no
+  longer supported").
+- crates.io `aspen-crm` 0.1.0 lacks a record-value case the 26.4.1 host has, under the same label.
+  A component that queries has been refused at check-in for it (*observed on a live instance*).
+
+Tell the human before building a page or a querying trigger. Don't change the pins or point them
+at an x-platform checkout.
+
+**Where the docs are wrong for CLI 26.4.1:**
+
+| The docs say | Actually |
 |---|---|
-| "What does our `<domain>` model look like?" across many objects | `schema-explorer` |
-| Audit a metadata diff for breaking changes and dangling references before deploy | `metadata-reviewer` |
-
-## Non-negotiables
-
-- **The CLI is the authority on its own verbs.** When a skill and `aspen <command> --help`
-  disagree, `--help` wins — and the skill is wrong; tell the human so it gets fixed in this plugin.
-- **Right binary, right folder, right instance — every `aspen` command.** Run it from the
-  session's instance directory (`cd <dir> && …`; only `compile`, `doctor` and `init` take a
-  `--dir`, and `move save-package --dir` names a package, not the directory), and only after
-  `.aspen/config.toml` there names the instance the user means *and* the one the CLI is signed
-  in to. Never point a command at another instance's folder without the user asking. A
-  guard hook enforces this (Claude Code asks or refuses; Codex refuses and says how to confirm).
-- **Never handle credentials.** Never pass `aspen login` an API key (`-k`). Sign in with OAuth in
-  the shape `getting-started` §2 gives: you run it, the user approves in the browser, and the
-  token goes to the OS keyring. You never see, type, ask for, or print a token or API key.
-- **Choose an object or field by its `description`, never by its name.** Names mislead
-  (`contact_rel_p` is a team member's relationship strength with a contact; `contact_role_p`
-  links a contact to any record). Read the `description` in `metadata/platform/object_p/<name>.json`
-  (or the describe) before you map onto, reuse or extend one. When none says it holds what you
-  need, ask.
-- **`aspen compile` before every deploy.** It runs the instance's own validator offline and
-  reports what `checkin-prep` would, without a round trip on the shared instance.
-- **Deploying changes a shared instance.** Confirm with the human before `aspen move save-package`
-  and before any recovery verb (`clear-package`, `checkin-clear`, `clear-dev`).
-- **"Deployed" is not "done"** until a record round-trip proves the behavior.
-- **Metadata can't be deleted yet** (it's on the roadmap). Retire with `"active": false`; never
-  delete a JSON file that was deployed.
-- **What you learn about the platform belongs in this plugin**, not in per-user memory. When a
-  compile or check-in teaches you something no skill says, tell the human it belongs in
-  `aspen-crm/aspen-code`, and add a one-line lesson to the instance repo (see `diagnose`).
-
-## Red flags — stop
-
-| Thought | Reality |
-|---|---|
-| "I'll `cd` to the other instance folder and deploy there too" | A different instance. Only when the user asked for that folder — the guard will ask. |
-| "I'll pass `--api-key` so login works under an agent" | Never. Run the OAuth login in the `getting-started` §2 shape; the user approves in the browser. |
-| "I'll edit `metadata/compiled/` / `active/`" | Replaced on the next compile/fetch. Author in `metadata/custom/`. |
-| "I'll guess the attribute name" | Copy a real component from `metadata/compiled/` or `platform/`. |
-| "It compiled, so it works" | Deploy, then a record round-trip. |
-| "The check-in is stuck; I'll clear it" | Shared state. Ask first — `build-and-deploy`. |
-| "I'll just `bail!` if the rule fails" | Ask the developer how each failure should reach the UI and the API first — `server-code` step 1. |
-| "I'll name the crate `server_main_c`" | Don't rename anything. The CLI deploys the `rust/` crate as `server_main_c` itself. |
-| "A deal object" | `opportunity_p` exists. `lean-data-model`. |
+| Log in with `aspen login -i <url> -k <api-key>` | This plugin never uses an API key. `aspen login -i <url>` is OAuth in a browser; under an agent it needs `--agent no` and `ASPEN_INTERACTIVE=1` (`getting-started` step 2). |
+| `aspen download aspenc` fetches the validator | No `download` command. aspenup installs `aspenc` with `aspen`; `aspen compile --metadata` runs it. |
+| `aspen move --rust --dev` for fast Rust iteration | It looks for `server/` and `ui/`, not the `rust/` and `typescript/` `aspen init` creates. Deploy code through the check-in chain. |
+| A `custom_page` tab's `page-ui-code` is a URL template | Only `ui_main_c.<route name>` resolves (`metadata/metadata-shapes.md`). |
+| The Query Service example formats a value into the AQL string | Fine for constants and ids; never for request-supplied text. |

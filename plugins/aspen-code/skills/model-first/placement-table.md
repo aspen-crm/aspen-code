@@ -24,7 +24,7 @@ first, and are the reason this file exists.
 | Deals list, openable and in the nav | 1 | `list_view_p` + `layout_p` + `tab_p` in a new `tab_collection_p` | — |
 | Contract value remaining on an engagement | 1+2 | field `engagement_c.remaining_c`, maintained by `budget_roll_c` | **was wrong**: computed in the page, so nothing could list or alert on it |
 | Legal agreement draft → review → approved → executed | 1 | `lifecycle_p:legal_agreement_c.status_c` | **was wrong**: a picklist plus a Rust equality check, which encoded no allowed transitions |
-| Quote-line discount cannot exceed the rep's cap | 2 | `quote_guard_c.before_insert` with `error::bail!` | A page check is bypassed by the data API, the runtime MCP and every bulk load |
+| Quote-line discount cannot exceed the rep's cap | 2 | `quote_guard_c.before_insert`, rejecting with a field error | A page check is bypassed by the data API, the runtime MCP and every bulk load |
 | Territory rule evaluation across all accounts | 2 | `terr_enqueue_c` + `territory_eval_run_c` | **was wrong**: rule semantics lived in the browser, so accounts changed by any other path were never re-evaluated |
 | Editable weekly timesheet grid with undo | 3 | `project_plan_page_c` | No `layout_p` renders an editable grid; every cell it writes is a stored field |
 | Commission per person, per split, per line | 3 | `employeeCommissionsSection` | `aspen-derived-exempt`: recomputed per open — a stored table would be stale the moment a deal moved, and the platform has no scheduler |
