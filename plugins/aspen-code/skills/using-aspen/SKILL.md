@@ -92,7 +92,7 @@ what it actually does) and the compiler first, then real components in `metadata
 | — | Move records (and the objects and fields they need) from another Aspen instance into this one | `instance-migration` |
 | — | Move records from a **Salesforce** org into this instance: map its objects onto this data model, report the gaps and ETLs, extract and load | `salesforce-migration` |
 
-Steps 1 and 2 happen **before the first file**. Nothing on this platform deletes, so they are only
+Steps 1 and 2 happen **before the first file**. Metadata can't be deleted yet, so they are only
 cheap now. Skip them only when the tier is already settled: fixing a field you authored last turn,
 a trigger's logic, a label.
 
@@ -119,12 +119,18 @@ copy the shape, change it, compile.
 - **Never handle credentials.** Never pass `aspen login` an API key (`-k`). Sign in with OAuth in
   the shape `getting-started` §2 gives: you run it, the user approves in the browser, and the
   token goes to the OS keyring. You never see, type, ask for, or print a token or API key.
+- **Choose an object or field by its `description`, never by its name.** Names mislead
+  (`contact_rel_p` is a team member's relationship strength with a contact; `contact_role_p`
+  links a contact to any record). Read the `description` in `metadata/platform/object_p/<name>.json`
+  (or the describe) before you map onto, reuse or extend one. When none says it holds what you
+  need, ask.
 - **`aspen compile` before every deploy.** It runs the instance's own validator offline and
   reports what `checkin-prep` would, without a round trip on the shared instance.
 - **Deploying changes a shared instance.** Confirm with the human before `aspen move save-package`
   and before any recovery verb (`clear-package`, `checkin-clear`, `clear-dev`).
 - **"Deployed" is not "done"** until a record round-trip proves the behavior.
-- **Nothing deletes.** Retire with `"active": false`; never delete a JSON file that was deployed.
+- **Metadata can't be deleted yet** (it's on the roadmap). Retire with `"active": false`; never
+  delete a JSON file that was deployed.
 - **What you learn about the platform belongs in this plugin**, not in per-user memory. When a
   compile or check-in teaches you something no skill says, tell the human it belongs in
   `aspen-crm/aspen-code`, and add a one-line lesson to the instance repo (see `diagnose`).

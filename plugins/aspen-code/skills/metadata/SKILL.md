@@ -92,7 +92,8 @@ components in `active/`/`platform/`, then the docs, then this skill.
 
 ## What the docs do not say — learned from real check-ins
 
-- **Nothing deletes.** Retire a component, field, column or tab with `"active": false` and keep
+- **Metadata can't be deleted yet** (it's on the roadmap). Retire a component, field, column or
+  tab with `"active": false` and keep
   the file. Dropping a deployed custom child entry or deleting a deployed file fails check-in
   ("Child components cannot be dropped"). Platform children are never dropped by leaving them out
   of an overlay, because they merge in through `extends`. Reordering is fine.

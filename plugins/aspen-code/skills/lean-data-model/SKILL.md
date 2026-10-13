@@ -1,15 +1,15 @@
 ---
 name: lean-data-model
-description: Use BEFORE creating any new object, field, picklist, record type, tab or tab collection on an Aspen instance — especially when the request names a business noun (deal, company, ticket, project, task, contract). Checks whether the platform or this instance already holds the concept, and whether it earns a component at all. Nothing on Aspen deletes, so this runs before the first file, not at review.
+description: Use BEFORE creating any new object, field, picklist, record type, tab or tab collection on an Aspen instance — especially when the request names a business noun (deal, company, ticket, project, task, contract). Checks whether the platform or this instance already holds the concept, and whether it earns a component at all. Metadata can't be deleted yet, so this runs before the first file, not at review.
 ---
 
 # Earn the component
 
-Every component you author here is **permanent**. Aspen has no delete: an object, field, picklist
-or tab that turns out to be a mistake is retired with `"active": false` and stays in the model,
-in the metadata, and in everyone's way, forever.
+Every component you author here stays. Metadata can't be deleted yet (it's on the roadmap): an
+object, field, picklist or tab that turns out to be a mistake is retired with `"active": false`
+and stays in the model, in the metadata, and in everyone's way.
 
-That asymmetry is the whole point of this skill. Building is fast and unbuilding is impossible,
+That asymmetry is the whole point of this skill. Building is fast and unbuilding isn't possible yet,
 so the question "should this exist" has to be asked at the only moment it is cheap — **before the
 first file**, not in the summary after them.
 
@@ -87,6 +87,6 @@ ls metadata/active/object_p/layout_p metadata/active/object_p/tab_p        # whi
 Ignore the field names every object has — name, owner, status, description, dates — when judging
 overlap; that is what a CRM record looks like, not evidence of a copy.
 
-**Findings are about what to build next, not a demand to remove what is there.** Nothing deletes;
+**Findings are about what to build next, not a demand to remove what is there.** Metadata can't be deleted yet;
 a flagged object that is already deployed is a fact to work with, and the useful response is to
 stop the next one, not to churn the model.

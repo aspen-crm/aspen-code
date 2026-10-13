@@ -37,7 +37,8 @@ keeps its old code — a deploy that looks fine and changed nothing.
 - **Config vars:** if `./config_vars.json` exists, `save-package` uploads it after the save, and an
   upload **clears every var the file does not list**. Confirm the file is complete, or that it
   should not be there.
-- **Ask the human.** Deploying changes a shared instance, and what it creates is permanent.
+- **Ask the human.** Deploying changes a shared instance, and the components it creates can't be
+  deleted yet.
   Say what is going: the components, and whether code is included.
 
 ## 3. The check-in chain — ordered, each phase mandatory
@@ -84,4 +85,4 @@ A green `checkin-deploy` proves the package was accepted, not that it works.
    and tab are reachable from the nav.
 4. Only now say "deployed and verified". If you could not exercise it, say what is unverified.
 
-Records created to test are permanent — prefer one clearly-named record, and say so.
+Prefer one clearly-named record to test with.

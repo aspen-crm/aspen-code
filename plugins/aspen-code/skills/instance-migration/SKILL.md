@@ -7,8 +7,8 @@ description: Use when moving records from one Aspen instance to another — migr
 
 Copy records from a **source** Aspen instance into the **target** instance whose directory you
 are in. `scripts/migrate.mjs` beside this file does the mechanics: describe, page, batch, remap
-ids, resume. You and the user decide the mapping. This skill never deletes, so treat everything
-it writes to the target as permanent.
+ids, resume. You and the user decide the mapping. This skill never deletes: removing records it
+loaded is a separate step the user asks for (below).
 
 ```sh
 M="<this skill's dir>/scripts/migrate.mjs"
@@ -32,11 +32,15 @@ When you call the API yourself, to explore or to check a failure the script repo
   (`id_p`).
 - **Items in a batch succeed or fail on their own.** The whole batch rolls back only when a
   trigger errors or an insert breaks a unique constraint.
-- **Triggers create records too.** A contact with `primary_account_p` set gets a
-  `contact_role_p` for that account, with `role_p` blank. Inserting the same pair again breaks
-  `contact_role_chk_p`, which rolls back the batch. Update the record the trigger made instead.
-  A `*_chk_p` field holds its key as plain text (`<contact id>|<account id>`), so you can find
-  that record with a query on it.
+- **Triggers create records too.** Aspen derives a `contact_role_p` from
+  `contact_p.primary_account_p` and `account_p.primary_contact_p`, from `opportunity_p.customer_p`
+  (the contact, or the account's primary contact), and from cases, with `role_p` blank; and a
+  `team_role_p` from the owner of an account, opportunity or case (key it the same way, on
+  `team_role_chk_p` over `team_p` and `what_p`). Inserting
+  the same pair again breaks `contact_role_chk_p`, which rolls back the batch. Don't reload those:
+  key the object on the pair, `"key": {"field": "contact_role_chk_p", "of": ["contact_p",
+  "what_p"]}`, and `load` matches the derived record instead (`onMatch: "update"` writes your
+  `role_p` onto it). A `*_chk_p` field holds its key as plain text (`<contact id>|<what id>`).
 
 Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object whose describe says
 `deletable: true`), but only as a separate step the user asks for and approves. The script has no
@@ -87,7 +91,7 @@ thing you need from them.
 | A tab opened | "A tab is open for the source/target (`<instance>`). Sign in with an account that can read / create `<objects>`." If no tab opened, add the URL the script printed. |
 | `describe` | Object counts on each side; which requested objects exist on both. |
 | `draft` | Per object, a table `Field \| Proposal \| Why`: one row per `todo`, one per reference picklist the draft mapped, and one for the key, each with a proposal from the defaults below. Then the fields that map as they are, on one line. End with: "Reply yes to take these, or tell me which rows to change." The first time, add what cannot move: created and modified dates and users, history, files, the activity feed. |
-| The dry run | To insert, matched, failed. For failures: a row per field and problem, its count, and the proposed fix. When it's clean: the pilot ask, naming the target, objects, row counts and that the records are permanent. |
+| The dry run | To insert, matched, failed. For failures: a row per field and problem, its count, and the proposed fix. When it's clean: the pilot ask, naming the target, objects and row counts. |
 | A load | Inserted, failed, held back; the names of a few loaded records to check in the app; the next step (verify, or the full load). |
 | `verify` | Sampled, differences, not loaded; whether the migration is done. |
 
@@ -98,20 +102,22 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 | Gap | Propose | Why |
 |---|---|---|
 | A platform field (`_p`) on one side only, such as `smb_p`, `smt_p`, `extid_p` | Drop | The instances run different platform versions. A `_p` field can't be created. |
-| A custom field (`_c`) the target lacks | Drop, unless the user names a use | A new field is permanent: `lean-data-model` first. |
+| A custom field (`_c`) the target lacks | Drop, unless the user names a use | A new field can't be deleted yet: `lean-data-model` first. |
 | A lookup to users | Match by email, blank when there is no match: `"lookup": {"object": "user_p", "match": "email_p"}, "missing": "null"` | Migrating `user_p` creates users on the target. |
 | A lookup to another object not migrated | Drop, unless the user wants that object too | Migrating it brings its own decisions. |
 | A picklist value not on the target | The closest target value, in `map` | The user confirms each one. |
 | A reference picklist (`object_type_ref`, `security_profile_ref` in `schema/target.json`), such as `otype_p` | Drop. Map a value only when the user names the target value it becomes. | Neither the schema nor the dry run lists these values, and the instance refuses one it doesn't have. |
 | A required target field nothing maps to | A constant in `value` | Ask which. |
 | No key | A mapped field that is unique on the target, or none | It matters only for a second source, or a reload from a new workspace. |
+| `contact_role_p` | The composite key on `contact_role_chk_p` (above) | Triggers derive some of these pairs before the load reaches them. |
 
 ## Red flags
 
 | Thought | Reality |
 |---|---|
+| "`contact_rel_p` sounds like the source's contact relationship" | Names mislead. Pick the target by the `description` in `schema/target.json`, or ask. |
 | "I'll list the options and let the user pick" | Propose one per row. They answer yes once, not twelve times. |
-| "I'll upsert on the legacy id" / "add `legacy_id_c` everywhere" | No upsert; the id map makes a re-run safe, and a field is permanent. |
+| "I'll upsert on the legacy id" / "add `legacy_id_c` everywhere" | No upsert; the id map makes a re-run safe, and a field can't be deleted yet. |
 | "I'll skip the pilot" | This skill cannot undo a bad full load. |
-| "The pilot will show whether the target accepts it" | The pilot writes permanent records. It is not a test: settle the value with the user first. |
+| "The pilot will show whether the target accepts it" | The pilot writes real records on the target. It is not a test: settle the value with the user first. |
 | "The load failed, so I'll clear the target and reload" | This skill never deletes. Fix the mapping and run again; the id map skips what loaded. |
