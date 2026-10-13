@@ -84,6 +84,18 @@ const sameUrl = (a, b) => String(a).trim().replace(/\/+$/, '').toLowerCase() ===
 const failureText = (j) => (j?.failures ?? []).map((f) => f.display_detail || f.detail || [f.error_type, f.subtype].filter(Boolean).join('/')).join('; ')
 // Only ids and timestamps the API returned go into a query this script builds.
 const literal = (v) => { if (!/^[\w:.+-]+$/.test(String(v))) throw new Stop(`unexpected value for a query: ${v}`, 1); return `'${v}'` }
+// A key is a target field the record writes, or a platform uniqueness key over fields it writes:
+// {"field": "contact_role_chk_p", "of": ["contact_p", "what_p"]} matches the target record whose
+// contact_role_chk_p is "<contact id>|<what id>", the text a *_chk_p field holds. That is how a
+// record a trigger already derived is matched instead of inserted twice, which breaks the
+// constraint and rolls back the whole batch.
+const keyField = (o) => typeof o.key === 'object' && o.key ? o.key.field : o.key
+const keyValue = (o, values) => {
+  if (!(typeof o.key === 'object' && o.key)) return values[o.key] ?? null
+  const parts = o.key.of.map((f) => values[f])
+  return parts.every((v) => v != null && v !== PLANNED) ? parts.join('|') : null
+}
+
 const lookupObjects = (e) => typeof e.lookup === 'string' ? [e.lookup] : Array.isArray(e.lookup) ? e.lookup : []
 const isMatch = (e) => e.lookup && typeof e.lookup === 'object' && !Array.isArray(e.lookup)
 const writable = (o) => Object.entries(o.fields).filter(([n]) => !SYSTEM.has(n))
@@ -193,8 +205,11 @@ async function describeInstance ({ read }) {
   for (const [name, v] of Object.entries(await variants('/describe/object_p', names))) {
     objects[name] = {
       label: v.label ?? name,
+      description: v.description ?? null, // what the object is for: choose a target by this, not by its name
+      includedPolyids: v['included-polyids'] ?? [], // the polyids ({object, field}) that may point at this object
       fields: Object.fromEntries((v.fields ?? []).filter((f) => f.active !== false).map((f) => [f.name, {
         label: f.label ?? f.name,
+        description: f.description ?? null,
         type: f.type,
         subtype: f.subtype ?? null,
         required: !!f.required,
@@ -202,6 +217,7 @@ async function describeInstance ({ read }) {
         readOnly: !!f['read-only'], // platform-generated (increment, converted currency) or locked in the initial state
         lookup: f.relationship ?? null,
         objects: f['allowed-objects'] ?? null,
+        relatedObjectField: f['related-object-field'] ?? null, // a polyid's companion naming the object it points at
         picklist: f.picklist ?? null
       }]))
     }
@@ -277,13 +293,17 @@ function checkMapping (m, T) {
     const TO = T.objects[o.target]
     if (!TO) throw new Stop(`mapping.json: ${o.source} → ${o.target}: no such object on the target (run describe again after creating it)`)
     if (o.onMatch && !['skip', 'update'].includes(o.onMatch)) throw new Stop(`mapping.json: ${o.source}: onMatch is "skip" or "update"`)
-    if (o.key && !o.fields.some((e) => e.target === o.key && !e.drop)) throw new Stop(`mapping.json: ${o.source}: key ${o.key} is not one of the fields it writes`)
+    if (o.key && typeof o.key === 'object') {
+      if (!o.key.field || !Array.isArray(o.key.of) || !o.key.of.length) throw new Stop(`mapping.json: ${o.source}: a composite key needs "field" and "of"`)
+      for (const f of o.key.of) if (!o.fields.some((e) => e.target === f && !e.drop)) throw new Stop(`mapping.json: ${o.source}: key part ${f} is not one of the fields it writes`)
+    } else if (o.key && !o.fields.some((e) => e.target === o.key && !e.drop)) throw new Stop(`mapping.json: ${o.source}: key ${o.key} is not one of the fields it writes`)
     for (const e of o.fields) {
       const at = `mapping.json: ${o.source}.${e.target ?? e.from}`
       if (e.drop) continue
       if (!TO.fields[e.target]) throw new Stop(`${at}: ${o.target} has no field ${e.target}`)
       if (SYSTEM.has(e.target)) throw new Stop(`${at}: ${e.target} is a system field and cannot be written`)
-      if (!('value' in e) && !e.expr && !e.from) throw new Stop(`${at}: needs "from", "value" or "expr"`)
+      if (!('value' in e) && !e.expr && !e.from && !e.objectOf) throw new Stop(`${at}: needs "from", "value", "expr" or "objectOf"`)
+      if (e.objectOf && !o.fields.some((x) => x.target === e.objectOf && x.lookup && !x.drop)) throw new Stop(`${at}: objectOf ${e.objectOf} is not a lookup this object writes`)
       for (const x of lookupObjects(e)) if (!names.has(x)) throw new Stop(`${at}: lookup ${x} is not an object in this mapping; migrate it or use {"object", "match"}`)
       if (isMatch(e) && !(e.lookup.object && e.lookup.match)) throw new Stop(`${at}: a match lookup needs "object" and "match"`)
     }
@@ -305,7 +325,7 @@ function loadOrder (m) {
   }
   return order.map((n, i) => ({
     entry: byName[n],
-    deferred: new Set(byName[n].fields.filter((e) => !e.drop && lookupObjects(e).some((d) => order.indexOf(d) >= i)).map((e) => e.target))
+    deferred: deferredFields(byName[n].fields, (d) => order.indexOf(d) >= i)
   }))
 }
 
@@ -346,6 +366,23 @@ function evaluate (expr, row) {
   if (!compiled.has(expr)) compiled.set(expr, new Function('r', `"use strict"; return (${expr})`))
   return compiled.get(expr)(row)
 }
+// The fields filled by the second pass: lookups to the object itself or to one loaded after it,
+// and the companion naming what each of those points at.
+function deferredFields (fields, later) {
+  const out = new Set(fields.filter((e) => !e.drop && lookupObjects(e).some(later)).map((e) => e.target))
+  for (const e of fields) if (e.objectOf && out.has(e.objectOf)) out.add(e.target)
+  return out
+}
+
+// A polyid's companion ({"target": "whaton_p", "objectOf": "what_p"}) names the target object the
+// polyid's id resolved through: the object of a match lookup, or the target of the source object
+// whose id map held it. Blank when the polyid is blank, so the pair never disagrees.
+function pointer (e, v, objs, resolve, targetOf) {
+  if (isMatch(e)) return e.lookup.object
+  const x = objs.find((o) => resolve([o], v))
+  return x ? targetOf[x] ?? null : null
+}
+
 const raw = (e, row) => 'value' in e ? e.value : e.expr ? evaluate(e.expr, row) : row[e.from] ?? null
 
 function format (v, f) {
@@ -363,13 +400,14 @@ function format (v, f) {
   return { value: s }
 }
 
-function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred }) {
+function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred, targetOf = {} }) {
   const values = {}
   const errors = []
+  const points = {}
   let wait = false
   const err = (field, kind, detail) => errors.push({ field, kind, detail })
   for (const e of o.fields) {
-    if (e.drop || deferred.has(e.target)) continue
+    if (e.drop || e.objectOf || deferred.has(e.target)) continue
     const f = TO.fields[e.target]
     let v
     try { v = raw(e, row) } catch (x) { err(e.target, 'expr failed', x.message); continue }
@@ -383,14 +421,12 @@ function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred })
         const r = refs[`${e.lookup.object}.${e.lookup.match}`]
         const key = r.source[v]
         const id = key == null ? undefined : r.target.get(key)
-        if (id) v = id
-        else if (e.missing === 'null') v = null
+        if (id) { points[e.target] = e.lookup.object; v = id } else if (e.missing === 'null') v = null
         else { err(e.target, 'no match on the target', `no ${e.lookup.object} with ${e.lookup.match} = ${key ?? '(blank)'}`); continue }
       } else {
         const objs = lookupObjects(e)
         const id = resolve(objs, v)
-        if (id) v = id
-        else if (objs.some((x) => extracted[x]?.has(v))) { wait = true; continue }
+        if (id) { points[e.target] = pointer(e, v, objs, resolve, targetOf); v = id } else if (objs.some((x) => extracted[x]?.has(v))) { wait = true; continue }
         else if (e.missing === 'null') v = null
         else { err(e.target, 'lookup not in the extract', `${objs.join('/')} ${v}`); continue }
       }
@@ -401,6 +437,12 @@ function convert (row, o, TO, picklists, { resolve, extracted, refs, deferred })
     // A reference picklist (object type, security profile, field) names no list; the instance checks it.
     if (f.type === 'picklist' && f.picklist && out.value != null && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
     values[e.target] = out.value
+  }
+  for (const e of o.fields) {
+    if (e.drop || !e.objectOf || deferred.has(e.target)) continue
+    const v = points[e.objectOf] ?? null
+    if (v === null && TO.fields[e.target]?.required) { err(e.target, 'required', `blank: ${e.objectOf} is blank`); continue }
+    values[e.target] = v
   }
   return { values, errors, wait }
 }
@@ -434,6 +476,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   const T = schema(ws, 'target')
   checkMapping(m, T)
   const order = loadOrder(m)
+  const targetOf = Object.fromEntries(m.objects.map((o) => [o.source, o.target]))
   const files = (o) => ({ extract: ws.path('extract', `${o.source}.jsonl`), idmap: ws.path('idmap', `${o.source}.jsonl`), patched: ws.path('idmap', `${o.source}.patched.jsonl`), errors: ws.path('errors', `${o.source}.jsonl`) })
   const rows = {}; const extracted = {}; const idmaps = {}; const matched = {}; const planned = {}; const errors = {}; const stats = {}
   for (const { entry: o } of order) {
@@ -471,8 +514,8 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     const o = step.entry
     const TO = T.objects[o.target]
     const st = stats[o.source]
-    const existing = o.key ? await indexBy(tgt.reader, o.target, o.key) : null
-    const ctx = { resolve: resolveId, extracted, refs, deferred: step.deferred }
+    const existing = o.key ? await indexBy(tgt.reader, o.target, keyField(o)) : null
+    const ctx = { resolve: resolveId, extracted, refs, deferred: step.deferred, targetOf }
     const inserts = []; const updates = []; const keys = new Set()
     for (const row of rows[o.source]) {
       const c = convert(row, o, TO, T.picklists, ctx)
@@ -484,7 +527,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
       }
       if (c.errors.length) { fail(o, row.id_p, c.errors); continue }
       if (c.wait) { st.waiting++; continue }
-      const kv = o.key ? c.values[o.key] : null
+      const kv = o.key ? keyValue(o, c.values) : null
       if (kv != null && existing.has(kv)) {
         st.matched++
         if (run) remember(o, row.id_p, existing.get(kv), true)
@@ -492,7 +535,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
         if (o.onMatch === 'update') updates.push({ row, values: { id_p: existing.get(kv), ...c.values } })
         continue
       }
-      if (kv != null && keys.has(kv)) { fail(o, row.id_p, { field: o.key, kind: 'duplicate key in the source', detail: `another ${o.source} record has the same ${o.key}` }); continue }
+      if (kv != null && keys.has(kv)) { fail(o, row.id_p, { field: keyField(o), kind: 'duplicate key in the source', detail: `another ${o.source} record has the same ${keyField(o)}` }); continue }
       if (kv != null) keys.add(kv)
       if (limit != null && inserts.length >= limit) { st.held++; continue }
       inserts.push({ row, values: c.values })
@@ -525,13 +568,16 @@ async function load (ws, m, tgt, { run, limit, batch }) {
       if (matched[o.source].has(row.id_p) && o.onMatch !== 'update') continue
       const values = {}
       let open = false
-      for (const e of o.fields.filter((x) => !x.drop && step.deferred.has(x.target))) {
+      const points = {}
+      for (const e of o.fields.filter((x) => !x.drop && !x.objectOf && step.deferred.has(x.target))) {
         const v = raw(e, row)
         if (v == null) continue
         const id = resolveId(lookupObjects(e), v)
-        if (id) values[e.target] = id
-        else if (lookupObjects(e).some((x) => extracted[x]?.has(v))) open = true
+        if (id) { values[e.target] = id; points[e.target] = pointer(e, v, lookupObjects(e), resolveId, targetOf) } else if (lookupObjects(e).some((x) => extracted[x]?.has(v))) open = true
         else if (e.missing !== 'null') fail(o, row.id_p, { field: e.target, kind: 'lookup not in the extract', detail: `${lookupObjects(e).join('/')} ${v}` })
+      }
+      for (const e of o.fields.filter((x) => !x.drop && x.objectOf && step.deferred.has(x.target))) {
+        if (points[e.objectOf]) values[e.target] = points[e.objectOf]
       }
       if (open) st.pending++
       if (Object.keys(values).length) items.push({ row, values: { id_p: t, ...values }, complete: !open })
@@ -617,7 +663,7 @@ async function verify (ws, m, tgt, { sample }) {
   for (const ref of matchRefs(m)) {
     refs[`${ref.object}.${ref.match}`] = { source: readJson(ws.path('extract', 'match', `${ref.object}.${ref.match}.json`)), target: await indexBy(tgt.reader, ref.object, ref.match) }
   }
-  const ctx = { resolve: (objs, id) => objs.map((x) => idmaps[x]?.get(id)).find(Boolean), extracted, refs, deferred: new Set() }
+  const ctx = { resolve: (objs, id) => objs.map((x) => idmaps[x]?.get(id)).find(Boolean), extracted, refs, deferred: new Set(), targetOf: Object.fromEntries(m.objects.map((o) => [o.source, o.target])) }
   const out = []; const mismatches = []
   for (const { entry: o } of order) {
     const TO = T.objects[o.target]

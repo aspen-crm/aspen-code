@@ -192,13 +192,18 @@ const SOURCE_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
   company_c: [text('name_c', { required: true }), picklist('sector_c'), lookup('parent_c', 'company_c'), lookup('owner_p', 'user_p'), text('note_c', { long: true }), number('score_c'), objectType('otype_c')],
   person_c: [text('first_c'), text('last_c'), text('email_c'), lookup('company_c', 'company_c'), date('born_c'), datetime('met_c')],
-  project_c: [text('name_c'), picklist('stage_c'), lookup('company_c', 'company_c'), number('budget_c'), text('extra_c'), text('code_c')]
+  project_c: [text('name_c'), picklist('stage_c'), lookup('company_c', 'company_c'), number('budget_c'), text('extra_c'), text('code_c')],
+  role_c: [lookup('person_c', 'person_c'), lookup('company_c', 'company_c')],
+  visit_c: [text('subject_c'), text('about_c')] // about_c holds a company or a person id
 }
 const TARGET_OBJECTS = {
   user_p: [text('email_p', { unique: true })],
   account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p')],
   contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c')],
-  project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true }), { ...text('code_c'), 'read-only': true }]
+  project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true }), { ...text('code_c'), 'read-only': true }],
+  // A contact linked to any record; a trigger derives some, and contact_role_chk_p keeps each pair once.
+  contact_role_p: [lookup('contact_p', 'contact_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref' }, text('contact_role_chk_p', { unique: true })],
+  task_p: [text('subject_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref' }]
 }
 const LONG_NOTE = 'n'.repeat(300)
 const sourceRecords = () => ({
@@ -213,7 +218,16 @@ const sourceRecords = () => ({
     { id_p: 'p2', ct_p: '2022-01-01T00:00:00.000Z', first_c: 'Bo', last_c: 'Kim', email_c: 'bo@x.com', company_c: 'c3', born_c: null, met_c: null },
     { id_p: 'p3', ct_p: '2022-01-02T00:00:00.000Z', first_c: 'Cy', last_c: null, email_c: 'cy@x.com', company_c: null, born_c: null, met_c: null }
   ],
-  project_c: []
+  project_c: [],
+  role_c: [
+    { id_p: 'r1', ct_p: '2023-01-01T00:00:00.000Z', person_c: 'p1', company_c: 'c1' },
+    { id_p: 'r2', ct_p: '2023-01-01T00:00:01.000Z', person_c: 'p2', company_c: 'c3' }
+  ],
+  visit_c: [
+    { id_p: 'v1', ct_p: '2023-02-01T00:00:00.000Z', subject_c: 'Kickoff', about_c: 'c1' },
+    { id_p: 'v2', ct_p: '2023-02-01T00:00:01.000Z', subject_c: 'Call', about_c: 'p2' },
+    { id_p: 'v3', ct_p: '2023-02-01T00:00:02.000Z', subject_c: 'Lost', about_c: 'gone' }
+  ]
 })
 const targetRecords = () => ({ user_p: [{ id_p: 't1', ct_p: '2025-01-01T00:00:00.000Z', email_p: 'a@x.com' }] })
 
@@ -498,6 +512,56 @@ test('a record already on the target is matched by key, not inserted twice', asy
   assert.equal(s.tgt.records.account_p.length, 3)
   assert.equal(byName(s.tgt, 'contact_p', 'email_p', 'ada@x.com').account_p, 'a-existing')
   assert.equal(byName(s.tgt, 'account_p', 'name_p', 'Acme').industry_p, 'other_p', 'onMatch skip leaves it alone')
+})
+
+test('a composite key matches the record a trigger already derived, and inserts the rest', async t => {
+  const target = targetRecords()
+  target.account_p = [{ id_p: 'a-existing', ct_p: '2025-01-01T00:00:00.000Z', name_p: 'Acme' }]
+  target.contact_p = [{ id_p: 'c-existing', ct_p: '2025-01-01T00:00:00.000Z', last_name_p: 'Lee', email_p: 'ada@x.com' }]
+  target.contact_role_p = [{ id_p: 'r-existing', ct_p: '2025-01-01T00:00:00.000Z', contact_p: 'c-existing', what_p: 'a-existing', whaton_p: 'account_p', contact_role_chk_p: 'c-existing|a-existing' }]
+  const s = await setup(t, { target })
+  await s.ready([...SETTLED, { source: 'role_c', target: 'contact_role_p', key: { field: 'contact_role_chk_p', of: ['contact_p', 'what_p'] }, onMatch: 'skip', fields: [
+    { target: 'contact_p', from: 'person_c', lookup: 'person_c' },
+    { target: 'what_p', from: 'company_c', lookup: 'company_c' },
+    { target: 'whaton_p', objectOf: 'what_p' }
+  ] }])
+  const dry = await s.run('load', s.ws)
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr)
+  assert.doesNotMatch(dry.stdout, /duplicate key/, 'unresolved parts in a dry run are not a key')
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  const roles = s.tgt.records.contact_role_p
+  assert.equal(roles.length, 2, 'the derived pair is matched, not inserted again')
+  const bo = byName(s.tgt, 'contact_p', 'email_p', 'bo@x.com')
+  const gamma = byName(s.tgt, 'account_p', 'name_p', 'Gamma')
+  assert.ok(roles.some(x => x.contact_p === bo.id_p && x.what_p === gamma.id_p && x.whaton_p === 'account_p'))
+  assert.deepEqual(lines(join(s.ws, 'idmap', 'role_c.jsonl')).find(l => l.s === 'r1'), { s: 'r1', t: 'r-existing', m: 1 })
+})
+
+test('a polyid over two objects carries the object its id resolved to, and blank with it', async t => {
+  const s = await setup(t)
+  await s.ready([...SETTLED, { source: 'visit_c', target: 'task_p', onMatch: 'skip', fields: [
+    { target: 'subject_p', from: 'subject_c' },
+    { target: 'what_p', from: 'about_c', lookup: ['company_c', 'person_c'], missing: 'null' },
+    { target: 'whaton_p', objectOf: 'what_p' }
+  ] }])
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  const task = (subject) => byName(s.tgt, 'task_p', 'subject_p', subject)
+  assert.equal(task('Kickoff').what_p, byName(s.tgt, 'account_p', 'name_p', 'Acme').id_p)
+  assert.equal(task('Kickoff').whaton_p, 'account_p')
+  assert.equal(task('Call').what_p, byName(s.tgt, 'contact_p', 'email_p', 'bo@x.com').id_p)
+  assert.equal(task('Call').whaton_p, 'contact_p')
+  assert.equal(task('Lost').what_p ?? null, null, 'points at nothing migrated: blank')
+  assert.equal(task('Lost').whaton_p ?? null, null, 'and its object blank with it')
+})
+
+test('objectOf must name a lookup the object writes', async t => {
+  const s = await setup(t)
+  await s.ready([...SETTLED, { source: 'visit_c', target: 'task_p', fields: [{ target: 'subject_p', from: 'subject_c' }, { target: 'whaton_p', objectOf: 'what_p' }] }])
+  const r = await s.run('load', s.ws)
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /objectOf what_p is not a lookup/)
 })
 
 test('onMatch update writes the mapped fields onto the matched record', async t => {

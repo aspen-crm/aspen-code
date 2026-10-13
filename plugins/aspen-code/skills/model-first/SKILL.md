@@ -6,8 +6,8 @@ description: Use BEFORE authoring anything on an Aspen instance — a feature, s
 # Place it before you build it
 
 An Aspen instance has three tiers, and the request does not say which one it wants. Deciding that
-is this skill's whole job. Do it before the first file, because **nothing on this platform
-deletes** — a thing built in the wrong tier is permanent, and moving it later means authoring the
+is this skill's whole job. Do it before the first file, because **metadata can't be deleted
+yet** — a thing built in the wrong tier stays, and moving it later means authoring the
 model you skipped *and* rewriting everything that read the old shape.
 
 ```

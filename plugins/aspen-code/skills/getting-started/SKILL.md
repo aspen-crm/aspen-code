@@ -202,5 +202,5 @@ Then hand off to `using-aspen`.
 
 - Consent before installing, and before anything that writes to the instance.
 - Never type, echo, ask for, or read a credential.
-- Components and records created while testing are **permanent** on the platform — say so before
-  the user starts on a shared instance.
+- Components created while testing can't be deleted yet. On a shared instance, keep them few and
+  clearly named.

@@ -124,19 +124,37 @@ const schema = (ws, side) => {
 // value at write time, which a dry run never sees. The instance directory holds the compiled
 // metadata, so read the cap from there.
 function localCaps (ws, object) {
+  for (const d of localObjects(ws, object)) {
+    const out = {}
+    for (const f of d.fields ?? []) if (f['max-length'] != null) out[f.name] = f['max-length']
+    if (Object.keys(out).length) return out
+  }
+  return {}
+}
+
+// The instance directory's own metadata for `object`, most complete first.
+function localObjects (ws, object) {
+  const out = []
   for (const base of ['metadata', 'metacode']) {
     for (const sub of ['compiled', 'custom', 'platform']) {
       const file = join(ws.root, base, sub, 'object_p', `${object}.json`)
       if (!existsSync(file)) continue
-      try {
-        const d = readJson(file)
-        const out = {}
-        for (const f of d.fields ?? []) if (f['max-length'] != null) out[f.name] = f['max-length']
-        if (Object.keys(out).length) return out
-      } catch { /* a malformed local file is not worth failing the draft over */ }
+      try { out.push(readJson(file)) } catch { /* a malformed local file is not worth failing the draft over */ }
     }
   }
-  return {}
+  return out
+}
+
+// What Aspen says an object and each of its fields are for: the describe's description, else the
+// local metadata's. A mapping is chosen by these, not by a name that only looks close.
+function describedAs (ws, tgt, object) {
+  const T = tgt.objects[object]
+  const local = localObjects(ws, object)
+  const fields = {}
+  for (const name of Object.keys(T?.fields ?? {})) {
+    fields[name] = T.fields[name].description ?? local.flatMap((d) => d.fields ?? []).find((f) => f.name === name)?.description ?? null
+  }
+  return { object: T?.description ?? local.find((d) => d.description)?.description ?? null, fields }
 }
 
 const fillRates = (ws) => {
@@ -205,7 +223,23 @@ const bare = (name) => normalize(String(name).replace(/_(p|c)$/, ''))
 // Salesforce name (BillingCity -> billing_city). Every one still becomes a row in the gap
 // report, so a wrong guess is visible before anything loads.
 const SYNONYMS = {
-  description: ['about', 'notes'],
+  description: ['about', 'notes', 'body'],
+  email: ['work_email'], // contact_p.work_email_p "primary and active work email address"
+  phone: ['office_phone'], // contact_p.office_phone_p "primary office number"
+  who_id: ['who'],
+  what_id: ['what'],
+  product_code: ['sku'],
+  start_date_time: ['when'], // meeting_p.when_p "date and time the meeting starts"
+  end_date_time: ['end'],
+  is_all_day_event: ['all_day'],
+  activity_date: ['due_date'], // a Task's ActivityDate is its due date
+  completed_date_time: ['when'], // task_p.when_p "date and time the task was completed"
+  lead_source: ['source'],
+  start_date: ['start'],
+  end_date: ['end'],
+  converted_account_id: ['account'],
+  converted_contact_id: ['contact'],
+  converted_opportunity_id: ['opportunity'],
   number_of_employees: ['employees', 'employee_count'],
   annual_revenue: ['revenue'],
   mobile_phone: ['mobile'],
@@ -217,9 +251,9 @@ const SYNONYMS = {
   stage_name: ['stage'],
   close_date: ['close'],
   owner_id: ['owner'],
-  account_id: ['account'],
+  account_id: ['account', 'customer'], // opportunity_p.customer_p "account or contact ... as the buyer"
   contact_id: ['contact'],
-  parent_id: ['parent', 'parent_account'],
+  parent_id: ['parent', 'parent_account', 'parent_case', 'what'],
   reports_to_id: ['reports_to', 'manager'],
   first_name: ['first'],
   last_name: ['last'],
@@ -228,6 +262,83 @@ const SYNONYMS = {
   web_site: ['website'],
   photo_url: ['photo', 'image']
 }
+
+// Salesforce junctions Aspen models as one polymorphic object. contact_role_p "associates a
+// contact with any other record" and team_role_p "a person on a team with any other record" (their
+// descriptions): what_p, a polyid, names the record and whaton_p its object. No name or label
+// matches them, and contact_rel_p -- by its description a team member's relationship strength with
+// a contact -- only looks close. `parent` fills what_p, `member` the team member (a Salesforce
+// User, matched by email), and `role` is proposed for role_p.
+//
+// Aspen's triggers derive these rows too: a contact role from contact_p.primary_account_p and
+// account_p.primary_contact_p, from opportunity_p.customer_p and from a case's contact; a team
+// role from the owner of an account, opportunity or case. Inserting a pair one of them already
+// made breaks the *_chk_p key ("<left id>|<what id>") and rolls back the batch, so `key` matches on
+// it and the derived row is left as it is. Salesforce's direct AccountContactRelation (the
+// contact's own account) is exactly that pair, so it is not extracted at all.
+const CONTACT_KEY = ['contact_role_chk', 'contact', 'what']
+const TEAM_KEY = ['team_role_chk', 'team', 'what']
+const JUNCTIONS = {
+  AccountContactRelation: {
+    target: 'contact_role', parent: 'AccountId', role: 'Roles', key: CONTACT_KEY, where: 'IsDirect = false',
+    note: 'Direct relations are not extracted: contact_role_p already holds each one, derived when the contact loads with its primary account.'
+  },
+  OpportunityContactRole: { target: 'contact_role', parent: 'OpportunityId', role: 'Role', key: CONTACT_KEY },
+  CaseContactRole: { target: 'contact_role', parent: 'CasesId', role: 'Role', key: CONTACT_KEY },
+  AccountTeamMember: { target: 'team_role', parent: 'AccountId', member: 'UserId', role: 'TeamMemberRole', key: TEAM_KEY },
+  OpportunityTeamMember: { target: 'team_role', parent: 'OpportunityId', member: 'UserId', role: 'TeamMemberRole', key: TEAM_KEY },
+  CaseTeamMember: {
+    target: 'team_role', parent: 'ParentId', member: 'MemberId', role: 'TeamRoleId', key: TEAM_KEY, where: "Member.Type = 'User'",
+    note: "Only members who are users: a case's contacts are contact_role_p rows (CaseContactRole)."
+  }
+}
+
+// Salesforce activities onto Aspen's activity shape. task_p and meeting_p say it in parent_p's
+// description: "The parent record is associated with a team member, while multiple child records
+// can reference the same parent to represent associations with different contacts." The CRM
+// source holds an activity to one level, a root and its participants, at most 50 contacts, and
+// copies the root's what_p onto every row. So a Task or Event is the root, its who_p the owner
+// (a team member, matched by email), and each contact in TaskRelation/EventRelation is a child
+// row. WhoId is not mapped on the root: Salesforce lists that contact among the relations too.
+// A relation's IsWhat rows repeat WhatId, which the root carries already.
+const ACTIVITY_ROOTS = { Task: 'TaskRelation', Event: 'EventRelation' }
+const PARTICIPANTS = {
+  TaskRelation: {
+    target: 'task', activity: 'Task', parent: 'TaskId', person: 'RelationId', where: "IsWhat = false AND Relation.Type = 'Contact'",
+    copy: { subject: 'Task.Subject', due_date: 'Task.ActivityDate' },
+    note: "One row per contact on a task, each a child of the task's own row (parent_p). Leads and users on a task are not carried: who_p holds a contact or a team member, and the task's own row already names its owner."
+  },
+  EventRelation: {
+    target: 'meeting', activity: 'Event', parent: 'EventId', person: 'RelationId', where: "IsWhat = false AND Relation.Type = 'Contact'",
+    copy: { subject: 'Event.Subject', when: 'Event.StartDateTime', end: 'Event.EndDateTime', all_day: 'Event.IsAllDayEvent', location: 'Event.Location' },
+    note: "One row per contact invited to a meeting, each a child of the meeting's own row (parent_p). Invitees who are users are not carried here: meeting_p lists team members in team_p, and the meeting's own row names its organizer."
+  }
+}
+
+// Salesforce objects whose Aspen counterpart has another name, each checked against the target's
+// description: meeting_p "a scheduled or logged meeting", product_p "sellable product in the
+// product catalog", fiscal_period_p "a named, dated period in the fiscal calendar", team_p "an
+// employee, contractor, or partner", email_p "customer emails".
+const OBJECT_SYNONYMS = { Event: 'meeting', Product2: 'product', Period: 'fiscal_period', User: 'team', EmailMessage: 'email' }
+
+// What a user must hear before an object loads, keyed by the Salesforce object.
+const OBJECT_NOTES = {
+  Lead: 'lead_p is "a potential future deal in an early stage", linked to an account or contact, not an unqualified person. Its trigger fills account_p and contact_p from email_p/phone_p and creates a contact for each lead it cannot match: migrate Contact and Account first, so leads match the contacts you loaded instead of creating new ones.',
+  User: 'team_p is "an employee, contractor, or partner of the company". Owners are matched to team members by email without migrating User; migrate it only to create team members who are not on Aspen yet.',
+  EmailMessage: "email_p holds \"customer emails captured from external email system automatically\": Aspen's email sync may already bring these in. Ask whether it is on before loading, or the two copies will both stay.",
+  Event: "meeting_p is \"synced from the user's calendar or entered manually\": calendar sync may already bring these in. This is each meeting's own row, naming its organizer; its contacts are EventRelation rows, so migrate EventRelation too.",
+  Task: "This is each task's own row, naming its owner; its contacts are TaskRelation rows, so migrate TaskRelation too."
+}
+
+// Objects Aspen derives itself. Loading them duplicates or fights the trigger that writes them.
+const DERIVED = {
+  contact_owner: "contact_p.owner_p (the contact trigger writes the owning row)",
+  contact_channel: "contact_p's email, phone and LinkedIn fields (the contact trigger reconciles these rows)",
+  contact_merge: 'the contact merge and unmerge endpoints, its only writers'
+}
+
+// Salesforce's address fields. Aspen holds an address as its own record, not as fields.
+const ADDRESS = /^(Billing|Shipping|Mailing|Other)(Street|City|State|PostalCode|Country|StateCode|CountryCode|Latitude|Longitude|GeocodeAccuracy)$/
 
 // Salesforce platform plumbing: it holds data, but what it means on Aspen is a modelling
 // decision, not a field match. Naming each one keeps it out of the undifferentiated drop pile.
@@ -285,7 +396,10 @@ function pickTargetObject (sourceName, sourceLabel, tgt) {
   for (const [name, o] of Object.entries(tgt.objects)) {
     if (want.has(bare(name)) || want.has(normalize(o.label))) return name
   }
-  return null
+  const alias = Object.hasOwn(JUNCTIONS, sourceName) ? JUNCTIONS[sourceName].target
+    : Object.hasOwn(PARTICIPANTS, sourceName) ? PARTICIPANTS[sourceName].target
+      : Object.hasOwn(OBJECT_SYNONYMS, sourceName) ? OBJECT_SYNONYMS[sourceName] : null
+  return alias ? Object.keys(tgt.objects).find((name) => bare(name) === alias) ?? null : null
 }
 
 function targetIndex (T) {
@@ -325,7 +439,23 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
   const target = pickTargetObject(name, S.label, tgt)
   const T = target ? tgt.objects[target] : null
   const entry = { source: name, target, key: null, onMatch: 'skip' }
-  if (!T) entry.todo = `no Aspen object matches ${name}: set "target" to an existing object, or create one (lean-data-model -> model-first -> metadata -> build-and-deploy), then describe the target again`
+  const junction = T && Object.hasOwn(JUNCTIONS, name) && bare(target) === JUNCTIONS[name].target ? JUNCTIONS[name] : null
+  const part = T && Object.hasOwn(PARTICIPANTS, name) && bare(target) === PARTICIPANTS[name].target ? PARTICIPANTS[name] : null
+  const root = T && Object.hasOwn(ACTIVITY_ROOTS, name) && ['task', 'meeting'].includes(bare(target)) ? ACTIVITY_ROOTS[name] : null
+  const where = junction?.where ?? part?.where
+  if (where) entry.where = where
+  const note = junction?.note ?? part?.note ?? (Object.hasOwn(OBJECT_NOTES, name) ? OBJECT_NOTES[name] : null)
+  if (note) entry.note = note
+  if (junction) {
+    const [field, ...of] = junction.key.map((b) => Object.keys(T.fields).find((n) => bare(n) === b))
+    if (field && of.every(Boolean)) entry.key = { field, of }
+  }
+  const derived = T ? (Object.hasOwn(DERIVED, bare(target)) ? DERIVED[bare(target)] : /^miner_/.test(target) ? 'the Miner sync, its only writer' : null) : null
+  if (derived) entry.todo = `Aspen derives ${target} from ${derived}. Don't load it: drop ${name} from this migration.`
+  // The junction's fields whose target its name does not say.
+  const forced = junction ? { [junction.parent]: 'what', [junction.role]: 'role', ...(junction.member ? { [junction.member]: 'team' } : {}) }
+    : part ? { [part.parent]: 'parent', [part.person]: 'who' } : {}
+  if (!T) entry.todo = `no Aspen object matches ${name} by name: read the object descriptions in schema/target.json and set "target" to the one that holds what ${name} holds (ask the user when none clearly does), or create one (lean-data-model -> model-first -> metadata -> build-and-deploy), then describe the target again`
   const idx = T ? targetIndex(T) : null
   const filled = fill?.objects?.[name]?.fields ?? null
   const caps = T ? localCaps(ws, target) : {}
@@ -351,30 +481,53 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
       continue
     }
 
-    const [tname, rule] = T ? matchField(fname, f, idx) : [null, null]
+    const [tname, rule] = Object.hasOwn(forced, fname)
+      ? [Object.keys(T.fields).find((n) => bare(n) === forced[fname]) ?? null, 'junction']
+      : T ? matchField(fname, f, idx) : [null, null]
     row.target = tname; row.rule = rule ?? ''
     const tf = tname ? T.fields[tname] : null
 
-    // Nothing on the target to carry it. Drop is the proposal: a new field is permanent, so it
+    // Nothing on the target to carry it. Drop is the proposal: a new field can't be deleted yet, so it
     // goes through lean-data-model only if the user names a use. The report ranks these by how
     // much data they actually hold, so an empty field is never a question.
     if (!tf) {
-      const [pgap, pnote] = PLATFORM[fname] ?? []
+      const [pgap, pnote] = PLATFORM[fname] ?? (ADDRESS.test(fname) && T ? addressGap(ws, tgt, target, name) : [])
       row.gap = gap ?? pgap ?? 'no target field'
       row.note = gap ? how : pnote ?? `nothing on ${target ?? 'the target'} matches`
       fields.push({ from: fname, drop: true, note: `no target field; ${row.note}` })
       rows.push(row); continue
     }
 
+    // An activity's own row names its owner, not a contact: the contacts are its relations.
+    if (root && fname === 'WhoId') {
+      const why = `the contacts are child rows from ${root}, which lists this one too`
+      fields.push({ from: fname, drop: true, note: why })
+      rows.push({ ...row, target: tname, gap: 'participants', note: why })
+      continue
+    }
+
+    // A polyid takes the id and, beside it, the object it points at; polyMapping writes both.
+    // A relation's person is a contact: its `where` keeps only those.
+    if (tf.type === 'polyid' && f.sf.referenceTo.length) {
+      const pm = polyMapping(ws, src, tgt, target, tname, fname, part && fname === part.person ? { ...f, sf: { ...f.sf, referenceTo: ['Contact'] } } : f, migrating)
+      fields.push(...pm.fields)
+      rows.push({ ...row, ...pm.row })
+      continue
+    }
+
+    // A team member is a Salesforce User, even where the field could also name a contact.
+    const member = forced[fname] === 'team' && f.sf.referenceTo.includes('User')
+    const refs = member ? ['User'] : f.sf.referenceTo
+
     // It matched a target field. Now the mismatch, if any, is worth the user's time.
     const e = { target: tname, from: fname }
     row.decision = 'map'
-    if (gap) {
+    if (gap && !member) {
       row.note = how
       row.decision = 'todo'
       e.todo = `${gap}: ${how} Proposed target: ${tname}.`
-    } else if (f.sf.referenceTo.length === 1) {
-      const to = f.sf.referenceTo[0]
+    } else if (refs.length === 1) {
+      const to = refs[0]
       if (migrating.has(to)) {
         e.lookup = to
         row.confidence = 'exact'; row.note = `lookup to ${to}, which is migrating: resolved through the id map`
@@ -427,6 +580,26 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     rows.push(row)
   }
 
+  // The root's who_p is its owner; a child row copies what the root holds and it must carry too.
+  const userRef = (from) => ({ label: from, sf: { type: 'reference', referenceTo: ['User'] } })
+  const add = (tname, from, f) => {
+    if (!tname || fields.some((e) => e.target === tname && !e.drop)) return
+    const pm = polyMapping(ws, src, tgt, target, tname, from, f, migrating)
+    fields.push(...pm.fields)
+    rows.push({ source: from, label: f.label, sfType: 'reference', rule: 'activity', fill: null, ...pm.row })
+  }
+  const named = (b) => T ? Object.keys(T.fields).find((n) => bare(n) === b) ?? null : null
+  if (root && S.fields.OwnerId) add(named('who'), 'OwnerId', userRef('Assigned To'))
+  if (part) {
+    for (const [b, from] of Object.entries(part.copy)) {
+      const tname = named(b)
+      if (!tname || fields.some((e) => e.target === tname && !e.drop)) continue
+      fields.push({ target: tname, from })
+      rows.push({ source: from, label: `the ${part.activity}'s ${from.split('.')[1]}`, sfType: 'parent field', target: tname, rule: 'activity', confidence: 'exact', gap: null, decision: 'map', fill: null, note: `copied from the ${part.activity} this row belongs to` })
+    }
+    add(named('owner'), `${part.activity}.OwnerId`, userRef('Owner'))
+  }
+
   if (T) {
     for (const [fname, tf] of Object.entries(T.fields)) {
       if (tf.required && !fields.some((e) => e.target === fname && !e.drop)) {
@@ -435,11 +608,84 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
       }
     }
     const ext = Object.entries(S.fields).find(([n, f]) => f.sf.externalId && fields.some((e) => e.from === n && e.target))
-    entry.key = ext ? fields.find((e) => e.from === ext[0]).target
+    entry.key ??= ext ? fields.find((e) => e.from === ext[0]).target
       : fields.find((e) => e.target && !e.todo && !e.lookup && T.fields[e.target]?.unique)?.target ?? null
   }
   entry.fields = fields
   return { entry, rows }
+}
+
+// A polyid's companion field, which names the object it points at: the describe's
+// related-object-field, else the local metadata's.
+function companion (ws, tgt, object, field) {
+  return tgt.objects[object]?.fields?.[field]?.relatedObjectField ??
+    localObjects(ws, object).flatMap((d) => d.fields ?? []).find((f) => f.name === field)?.['related-object-field'] ?? null
+}
+
+// What a polyid may point at: its own allowed-objects, or else the objects whose included-polyids
+// name it (how what_p is opened to account_p, case_p, opportunity_p...). Read from the target, so
+// a new opt-in shows up without a change here.
+function allowedFor (ws, tgt, object, field) {
+  const own = tgt.objects[object]?.fields?.[field]?.objects ??
+    localObjects(ws, object).flatMap((d) => d.fields ?? []).find((f) => f.name === field)?.['allowed-objects']
+  if (own?.length) return own
+  return Object.keys(tgt.objects).filter((o) => {
+    const inc = tgt.objects[o].includedPolyids?.length ? tgt.objects[o].includedPolyids
+      : localObjects(ws, o).find((d) => d['included-polyids'])?.['included-polyids'] ?? []
+    return inc.some((x) => x.object === object && x.field === field)
+  })
+}
+
+// A Salesforce reference onto an Aspen polyid. The id goes through the id map, or for a User is
+// matched by email to the user object the polyid allows; the companion is written by load from the
+// object each id resolved to ("objectOf"), so the pair never disagrees. Whatever the polyid cannot
+// hold, or a record that is not migrating, carries blank where the polyid is optional.
+function polyMapping (ws, src, tgt, target, tname, fname, f, migrating) {
+  const tf = tgt.objects[target].fields[tname]
+  const on = companion(ws, tgt, target, tname)
+  const allowed = allowedFor(ws, tgt, target, tname)
+  const carried = []; const lost = []; const waiting = []
+  let user = null
+  for (const x of f.sf.referenceTo) {
+    if (x === 'User') {
+      // A Salesforce User is an Aspen user or team member, never a contact with the same email.
+      user = allowed.filter((o) => ['user', 'team'].includes(bare(o))).map((o) => userMatch(tgt, o)).find(Boolean) ?? null
+      if (!user) lost.push(x)
+      continue
+    }
+    const tx = pickTargetObject(x, src.objects[x]?.label ?? x, tgt)
+    if (tx && allowed.includes(tx)) (migrating.has(x) ? carried : waiting).push(x)
+    else lost.push(x)
+  }
+  const holds = allowed.length ? allowed.join(', ') : 'nothing the schema names'
+  const todo = (gap, why) => ({ fields: [{ target: tname, from: fname, todo: why }], row: { target: tname, gap, decision: 'todo', note: why } })
+  if (!on) return todo('polyid', `${tname} names no companion field to say what it points at; describe the target again`)
+  if (user && carried.length) return todo('polymorphic lookup', `${fname} points to a User and to ${carried.join(', ')}; ${tname} cannot be matched by email and by id in one field: map one and drop the other`)
+  const blank = !tf.required && (lost.length > 0 || waiting.length > 0)
+  const after = lost.length || waiting.length
+    ? `; rows pointing at ${[...lost, ...waiting].join(', ')} ${tf.required ? `fail (${tname} is required)` : 'carry blank'}${waiting.length ? ` unless ${waiting.join(', ')} migrates too` : ''}`
+    : ''
+  if (user) {
+    return {
+      fields: [{ target: tname, from: fname, lookup: user, sfMatch: { object: 'User', field: 'Email' }, missing: 'null' }, { target: on, objectOf: tname }],
+      row: { target: tname, confidence: 'close', gap: 'user lookup', decision: 'map', note: `matched to ${user.object}.${user.match} by email, blank when that person has no record on the target; ${on} follows${after}` }
+    }
+  }
+  if (!carried.length) {
+    return todo('lookup not migrating', `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}: ${waiting.length ? `migrate ${waiting.join(' or ')} too, or drop it` : 'none of those can go here: drop it'}`)
+  }
+  return {
+    fields: [{ target: tname, from: fname, lookup: carried.length === 1 ? carried[0] : carried, ...(blank ? { missing: 'null' } : {}) }, { target: on, objectOf: tname }],
+    row: { target: tname, confidence: after ? 'close' : 'exact', gap: after ? 'partly carried' : null, decision: 'map', note: `the ${carried.join(' or ')} it points at, through the id map; ${on} names its object${after}` }
+  }
+}
+
+// Where an address field goes: the target's own address object, by its description.
+function addressGap (ws, tgt, target, name) {
+  const child = Object.keys(tgt.objects).find((o) => bare(o) === `${bare(target)}_address`)
+  if (!child) return []
+  const about = describedAs(ws, tgt, child).object
+  return ['address', `Aspen keeps addresses as ${child} records${about ? ` ("${about}")` : ''}, not as fields on ${target}. Migrate them in a second workspace from ${name} to ${child}, with ${target} matched by a unique field, once ${name} has loaded.`]
 }
 
 // A value longer than the target's cap is rejected on write, and a dry run never sees it. Compare
@@ -463,9 +709,10 @@ function overLength (f, tf, tname, caps, maxLen, row) {
 
 // ---- the gap report: what needs a decision, what maps, and what is being dropped
 
-const CSV_COLUMNS = ['sf_object', 'aspen_object', 'sf_field', 'aspen_field', 'label', 'sf_type', 'aspen_type', 'aspen_subtype', 'confidence', 'decision', 'gap_category', 'matched_by', 'fill_rate', 'required', 'picklist', 'ref_target_sf', 'note']
+const CSV_COLUMNS = ['sf_object', 'aspen_object', 'sf_field', 'aspen_field', 'label', 'sf_type', 'aspen_type', 'aspen_subtype', 'confidence', 'decision', 'gap_category', 'matched_by', 'fill_rate', 'required', 'picklist', 'ref_target_sf', 'note', 'aspen_description']
 const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
 const pct = (v) => v == null ? '' : `${Math.round(v * 100)}%`
+const cell = (v, max = 140) => { const t = String(v ?? '').replace(/\s+/g, ' ').replace(/\|/g, '\\|'); return t.length > max ? `${t.slice(0, max - 1)}…` : t }
 
 function report (ws, m, src, tgt, fill) {
   const lines = []; const csv = [CSV_COLUMNS.join(',')]
@@ -490,21 +737,25 @@ function report (ws, m, src, tgt, fill) {
     const sfOwned = (o.fields ?? []).filter((e) => e.drop && !rows.some((r) => r.source === e.from)).length
     headline.push(`${o.source} -> ${o.target ?? '?'}: ${mapped.length} mapped, ${decide.length} to decide, ${carries.length} dropped with data, ${empty.length} dropped empty`)
 
+    const about = o.target && tgt.objects[o.target] ? describedAs(ws, tgt, o.target) : { object: null, fields: {} }
     lines.push(`## ${o.source} -> ${o.target ?? '(no target object)'}\n`)
+    if (about.object) lines.push(`> **${o.target}:** ${about.object}\n`)
     lines.push(`${S ? Object.keys(S.fields).length : 0} Salesforce fields: ${mapped.length} mapped, ${decide.length} need a decision, ${dropped.length} proposed for drop, ${sfOwned} Salesforce-owned (never migrate).\n`)
     if (o.todo) lines.push(`**Object:** ${o.todo}\n`)
+    if (o.where) lines.push(`**Extracted:** only rows where \`${o.where}\`.\n`)
+    if (o.note) lines.push(`**Note:** ${o.note}\n`)
 
     if (decide.length) {
       lines.push('### Needs your decision\n')
-      lines.push('| Salesforce field | Aspen field | Gap / ETL | Proposal |')
-      lines.push('|---|---|---|---|')
-      for (const r of decide) lines.push(`| \`${r.source || '—'}\` (${r.sfType || '—'}) | ${r.target ? `\`${r.target}\`` : '—'} | ${r.gap ?? ''} | ${r.note.replace(/\|/g, '\\|')} |`)
+      lines.push('| Salesforce field | Aspen field | What Aspen says it is | Gap / ETL | Proposal |')
+      lines.push('|---|---|---|---|---|')
+      for (const r of decide) lines.push(`| \`${r.source || '—'}\` (${r.sfType || '—'}) | ${r.target ? `\`${r.target}\`` : '—'} | ${cell(about.fields[r.target])} | ${r.gap ?? ''} | ${r.note.replace(/\|/g, '\\|')} |`)
       lines.push('')
     }
     if (carries.length) {
       lines.push('### Dropped, but holds data\n')
       lines.push('Nothing on the target carries these. Confirm the drop, or name a use and create the field')
-      lines.push('(`lean-data-model` first: a field is permanent).\n')
+      lines.push('(`lean-data-model` first: a field cannot be deleted yet).\n')
       lines.push('| Salesforce field | Type | Filled | Why it is dropped |')
       lines.push('|---|---|---|---|')
       for (const r of carries.slice(0, 40)) lines.push(`| \`${r.source}\` — ${r.label} | ${r.sfType} | ${pct(r.fill) || '?'} | ${(r.gap ?? '')}${r.note ? `: ${r.note.replace(/\|/g, '\\|')}` : ''} |`)
@@ -513,9 +764,9 @@ function report (ws, m, src, tgt, fill) {
     }
     if (mapped.length) {
       lines.push('### Maps as it is\n')
-      lines.push('| Salesforce field | Aspen field | Confidence | Note |')
-      lines.push('|---|---|---|---|')
-      for (const r of mapped) lines.push(`| \`${r.source}\` | \`${r.target}\` | ${r.confidence} | ${r.note.replace(/\|/g, '\\|')} |`)
+      lines.push('| Salesforce field | Aspen field | What Aspen says it is | Confidence | Note |')
+      lines.push('|---|---|---|---|---|')
+      for (const r of mapped) lines.push(`| \`${r.source}\` | \`${r.target}\` | ${cell(about.fields[r.target])} | ${r.confidence} | ${r.note.replace(/\|/g, '\\|')} |`)
       lines.push('')
     }
     if (empty.length) lines.push(`### Dropped, empty in the sample\n${empty.length} fields hold no data in the sample and are dropped without a question: ${empty.slice(0, 25).map((r) => `\`${r.source}\``).join(', ')}${empty.length > 25 ? `, … (all ${empty.length} in mapping/fields.csv)` : ''}\n`)
@@ -525,7 +776,7 @@ function report (ws, m, src, tgt, fill) {
       const sfF = S?.fields?.[r.source]
       csv.push([o.source, o.target ?? '', r.source, r.target ?? '', r.label, r.sfType, tf?.type ?? '', tf?.subtype ?? '',
         r.confidence, r.decision, r.gap ?? '', r.rule, r.fill == null ? '' : r.fill.toFixed(3), tf?.required ? 'true' : '',
-        tf?.picklist ?? '', (sfF?.sf?.referenceTo ?? []).join(' '), r.note].map(csvCell).join(','))
+        tf?.picklist ?? '', (sfF?.sf?.referenceTo ?? []).join(' '), r.note, about.fields[r.target] ?? ''].map(csvCell).join(','))
     }
   }
 
@@ -567,11 +818,18 @@ function query (ws, m, sql, mode) {
 // Salesforce returns an `attributes` envelope, and the Bulk API returns an empty string where
 // the record holds no value. migrate.mjs wants the source id in id_p, and a blank lookup has to
 // arrive as null or the target rejects it.
+// A parent field (`Event.Subject`) arrives nested from REST ({Event: {Subject}}) and dotted from a
+// bulk export; both land as the dotted name a mapping's "from" uses.
 function strip (r) {
   const { attributes, Id, CreatedDate, ...rest } = r
   const out = { id_p: Id }
   if (CreatedDate) out.ct_p = CreatedDate
-  for (const [k, v] of Object.entries(rest)) out[k] = (v === undefined || v === '') ? null : v
+  const put = (k, v) => { out[k] = (v === undefined || v === '') ? null : v }
+  for (const [k, v] of Object.entries(rest)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v)) if (k2 !== 'attributes') put(`${k}.${k2}`, v2)
+    } else put(k, v)
+  }
   return out
 }
 

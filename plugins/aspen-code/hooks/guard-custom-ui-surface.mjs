@@ -7,7 +7,7 @@
 // lines, on an instance whose object model has none of those fields. The screen looked right,
 // so review passed -- and the number could not be listed, filtered, sorted, reported on, read
 // by a trigger, alerted on, or seen by the MCP. A second surface needing the same
-// number reimplements it. On a platform where nothing deletes, that is permanent.
+// number reimplements it. And metadata can't be deleted yet, so the wrong tier stays.
 //
 // Unlike the token guard, this cannot be decided from the diff. Whether a page is the right
 // tier depends on what the model already holds, which is a judgement, not a pattern. So this
@@ -144,7 +144,7 @@ export function decide (filePath, toolInput, read = readOnDisk) {
     'This declares a custom UI surface. On Aspen the page is the LAST tier: a surface built ' +
     'over fields the model does not hold has nothing behind it — the values it shows cannot be ' +
     'listed, filtered, sorted, reported on, read by a trigger, or seen by the MCP, and ' +
-    'the next surface that needs them reimplements them. Nothing on this platform deletes, so ' +
+    'the next surface that needs them reimplements them. Metadata can\'t be deleted yet, so ' +
     'this is the last cheap moment to change tier.',
     'New here:\n' + added.map((surface) => `  - ${surface}`).join('\n'),
     'Before this lands, say which object and fields it reads, and why a `layout_p`, ' +

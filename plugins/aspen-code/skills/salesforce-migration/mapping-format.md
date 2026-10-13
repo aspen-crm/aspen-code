@@ -48,7 +48,7 @@ delta: what `source` means, the two Salesforce-only keys, and what `draft` puts 
 | `objects[].source` | The Salesforce API name, case-sensitive: `Account`, `Opportunity`, `Custom_Thing__c`. |
 | `objects[].where` | A **SOQL** condition, not AQL. It is appended to the extract query. |
 | `objects[].report` | Written by `draft`: one row per field behind `reports/gaps.md` and `mapping/fields.csv`. `sfmigrate gaps` re-renders from it. Not read by `load`. |
-| `fields[].from` | The Salesforce field API name. |
+| `fields[].from` | The Salesforce field API name, or a parent's field through its relationship (`Event.Subject` on an `EventRelation`), which `extract` selects and flattens to that name. |
 
 ## `sfMatch`: the source half of a match lookup
 

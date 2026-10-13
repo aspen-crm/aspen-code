@@ -33,7 +33,7 @@ left.
 | Key | Meaning |
 |---|---|
 | `source`, `target` | Object names on each instance. |
-| `key` | Optional. A **target** field that identifies the same record on both sides, such as an email or a name. `load` looks up target records by it, so a record that already exists is matched rather than inserted twice. Without a key, only the id map stops duplicates. |
+| `key` | Optional. A **target** field that identifies the same record on both sides, such as an email or a name. `load` looks up target records by it, so a record that already exists is matched rather than inserted twice. Without a key, only the id map stops duplicates. Or a platform uniqueness key over fields the entry writes, `{"field": "contact_role_chk_p", "of": ["contact_p", "what_p"]}`: it matches the record whose `contact_role_chk_p` is `<contact id>\|<what id>`, such as one a trigger derived. |
 | `onMatch` | `skip` (default) leaves a matched target record as it is. `update` writes the mapped fields onto it, and onto records already loaded, on every run. |
 | `where` | Optional. An AQL condition on the source (see the AQL reference in `aspen-docs`), added to every extract query. |
 | `fields` | One entry per target field written, plus one `drop` entry per source field left out on purpose. |
@@ -48,6 +48,7 @@ left.
 | `"from": "f", "lookup": "obj"` | The target id of the record migrated from `obj`, read from the id map. `obj` must be in this mapping. |
 | `"from": "f", "lookup": ["a", "b"]` | For a field that can point to several objects: the target id from whichever object's id map holds the source id. |
 | `"from": "f", "lookup": { "object": "user_p", "match": "email_p" }` | For an object that is not migrated: find the source record's `email_p`, then the target record with the same `email_p`. |
+| `"objectOf": "what_p"` | For a polyid's companion (`whaton_p`, `customeron_p`, `owneron_p`): the target object the named polyid's id resolved through, or blank when it is blank. Use it rather than a constant whenever the polyid's lookup lists more than one object; it keeps the pair from disagreeing. |
 | `"expr": "…"` | A JavaScript expression over the source row `r`, e.g. `` `${r.first_c} ${r.last_c}`.trim() ``. It returns a string, a number, a boolean or `null`. Use it only for a rule the user stated, and keep their words in `note`. |
 | `"from": "f", "drop": true` | Nothing. It records that the field was left out on purpose. |
 
