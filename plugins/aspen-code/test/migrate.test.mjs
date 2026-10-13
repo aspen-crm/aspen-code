@@ -201,9 +201,11 @@ const TARGET_OBJECTS = {
   account_p: [text('name_p', { required: true, unique: true }), picklist('industry_p'), lookup('parent_account_p', 'account_p'), lookup('owner_p', 'user_p'), text('description_p', { long: true }), objectType('otype_p'),
     { name: 'share_p', type: 'number', subtype: 'percentage', 'min-value': '0.00', 'max-value': '1.00' },
     { name: 'revenue_p', type: 'currency', subtype: 'currency' }, lookup('ccode_p', 'currency_p')],
-  currency_p: [text('currency_code_p', { unique: true })],
+  currency_p: [{ ...picklist('currency_code_p'), unique: true }],
   contact_p: [text('first_name_p'), text('last_name_p', { required: true }), text('email_p', { unique: true }), lookup('account_p', 'account_p'), date('birthdate_p'), datetime('last_met_c'),
-    { name: 'phone_p', type: 'text', subtype: 'phone' }, { name: 'site_p', type: 'text', subtype: 'url', 'max-length': 20 }],
+    { name: 'phone_p', type: 'text', subtype: 'phone' }, { name: 'site_p', type: 'text', subtype: 'url', 'max-length': 20 },
+    { name: 'mobile_phone_p', type: 'text', subtype: 'phone' }, { name: 'office_phone_p', type: 'text', subtype: 'phone' },
+    { name: 'linkedin_profile_p', type: 'text', subtype: 'url', 'max-length': 120 }, { name: 'bio_p', type: 'text', subtype: 'long', 'max-length': 5 }],
   project_c: [text('name_c', { unique: true }), picklist('stage_c'), lookup('company_c', 'account_p'), number('budget_c'), text('owner_c', { required: true }), { ...text('code_c'), 'read-only': true }],
   // A contact linked to any record; a trigger derives some, and contact_role_chk_p keeps each pair once.
   contact_role_p: [lookup('contact_p', 'contact_p'), { name: 'what_p', type: 'polyid', subtype: 'parent' }, { name: 'whaton_p', type: 'picklist', subtype: 'object_ref', required: true }, text('contact_role_chk_p', { unique: true }),
@@ -274,7 +276,7 @@ function browser (home) {
 async function setup (t, { target = targetRecords(), failCreate, warnCreate, expireAfter, api, migrate = script } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
   const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords(), api })
-  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
+  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], currency_code_p: ['usd_p', 'eur_p'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
   t.after(() => { src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
@@ -363,6 +365,7 @@ test('describe writes both schemas, with lookups and picklist values', async t =
   assert.deepEqual(src.picklists.sector_c, ['tech_c', 'bank_c', 'farm_c'])
   const tgt = JSON.parse(readFileSync(join(s.ws, 'schema', 'target.json'), 'utf8'))
   assert.equal(tgt.objects.account_p.fields.name_p.unique, true)
+  assert.deepEqual(tgt.currencies, ['usd_p'], 'the codes that have a currency_p record')
   // What the instance enforces on write, kept for the dry run.
   assert.equal(tgt.objects.contact_p.fields.site_p.maxLength, 20)
   assert.equal(tgt.objects.account_p.fields.share_p.maxValue, '1.00')
@@ -484,6 +487,51 @@ test('the dry run fails what the target would reject: format, length, range, obj
   assert.deepEqual(errs('person_c'), ['p2 phone_p: not an E.164 phone number', 'p2 site_p: too long', 'p3 phone_p: not an E.164 phone number', 'p3 site_p: not an http or https URL'])
   // r2 points at c3, which failed: it waits for it, and its required whaton_p is not blank yet.
   assert.deepEqual(errs('role_c'), ['r1 role_p: not allowed on that object'])
+})
+
+test('normalize, truncate and distinctFrom fix values on the way in, and the plan says what changed', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects[0].fields.push(
+    { target: 'phone_p', expr: "({ p1: '(415) 555-0100 x12', p2: '+44 20 7946 0958', p3: '11 98765 4321' })[r.id_p]", normalize: 'phone' },
+    { target: 'site_p', expr: "({ p1: 'acme.com', p2: 'ftp://x.org', p3: 'https://acme.com/?q=1234567890' })[r.id_p]", normalize: 'url' },
+    { target: 'linkedin_profile_p', expr: "({ p1: 'http://linkedin.com/in/ada/?trk=x', p2: 'https://twitter.com/bo' })[r.id_p] ?? null", normalize: 'linkedin' },
+    { target: 'bio_p', expr: "'abcdefgh'", truncate: true },
+    { target: 'mobile_phone_p', value: '+14155550100' },
+    { target: 'office_phone_p', value: '+14155550100', distinctFrom: 'mobile_phone_p' })
+  await s.ready(objects)
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  const ada = byName(s.tgt, 'contact_p', 'email_p', 'ada@x.com'); const bo = byName(s.tgt, 'contact_p', 'email_p', 'bo@x.com'); const cy = byName(s.tgt, 'contact_p', 'email_p', 'cy@x.com')
+  assert.deepEqual([ada.phone_p, bo.phone_p, cy.phone_p ?? null], ['+14155550100', '+442079460958', null], 'a national number with no country is left blank')
+  assert.deepEqual([ada.site_p, bo.site_p ?? null, cy.site_p], ['https://acme.com', null, 'https://acme.com/'])
+  assert.deepEqual([ada.linkedin_profile_p, bo.linkedin_profile_p ?? null], ['https://www.linkedin.com/in/ada', null])
+  assert.equal(ada.bio_p, 'abcde')
+  assert.equal(ada.office_phone_p ?? null, null, 'office equal to mobile is left blank')
+  const plan = readFileSync(join(s.ws, 'reports', 'load.md'), 'utf8')
+  assert.match(plan, /## Changed on the way in/)
+  assert.match(plan, /\| person_c \| office_phone_p \| blank: same as mobile_phone_p \| 3 \|/)
+  assert.match(plan, /\| person_c \| bio_p \| truncated to 5 \| 3 \|/)
+})
+
+test('the dry run checks the rules the CRM triggers enforce, such as phones that must differ', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects[0].fields.push({ target: 'mobile_phone_p', value: '+14155550100' }, { target: 'office_phone_p', value: '+14155550100' })
+  await s.ready(objects)
+  const r = await s.run('load', s.ws)
+  assert.equal(r.status, 1)
+  const kinds = lines(join(s.ws, 'errors', 'person_c.jsonl')).flatMap(l => l.errors.map(e => `${e.field}: ${e.kind}`))
+  assert.deepEqual([...new Set(kinds)], ['office_phone_p: must differ from mobile_phone_p'])
+})
+
+test('a pilot that loads cleanly chains into the full load and verify', async t => {
+  const s = await setup(t)
+  await s.ready()
+  const r = await s.run('load', s.ws, '--run', '--limit', '1', '--then', 'load', '--run', '--then', 'verify')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /== verify/)
+  assert.equal(s.tgt.records.contact_p.length, 3)
 })
 
 test('a match lookup finds records the same run loaded, and can match on the value itself', async t => {

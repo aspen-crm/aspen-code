@@ -77,10 +77,15 @@ const TARGET = {
   objects: {
     user_p: object('User', { email_p: text('Email', { unique: true }) }),
     team_p: object('Team', { email_p: text('Email', { unique: true }), user_p: id('User', 'user_p', { unique: true }) }, { description: 'An employee, contractor, or partner of the company.' }),
-    account_p: object('Account', { name_p: text('Name', { required: true }), owner_p: id('Owner', 'team_p'), website_p: field('Website', 'text', 'url', { maxLength: 120 }) },
+    account_p: object('Account', { name_p: text('Name', { required: true }), owner_p: id('Owner', 'team_p'), website_p: field('Website', 'text', 'url', { maxLength: 120 }), industry_p: field('Industry', 'picklist', 'picklist', { picklist: 'industry_p' }), parent_account_p: id('Parent Account', 'account_p') },
       { included: WHATS('task_p', 'meeting_p', 'contact_role_p', 'team_role_p') }),
     account_address_p: object('Account Address', { account_p: id('Account', 'account_p'), city_p: text('City') }, { description: 'Physical location or postal address associated with an account.' }),
-    contact_p: object('Contact', { last_name_p: text('Last Name'), work_email_p: text('Work Email', { description: 'Primary and active work email address.' }), office_phone_p: text('Office Phone'), primary_account_p: id('Primary Account', 'account_p') }),
+    contact_p: object('Contact', {
+      last_name_p: text('Last Name'), work_email_p: text('Work Email', { description: 'Primary and active work email address.' }),
+      office_phone_p: field('Office Phone', 'text', 'phone'), mobile_phone_p: field('Mobile Phone', 'text', 'phone'),
+      linkedin_profile_p: field('LinkedIn Profile', 'text', 'url', { maxLength: 120 }), owner_p: id('Owner', 'team_p'),
+      primary_account_p: id('Primary Account', 'account_p')
+    }),
     contact_channel_p: object('Contact Channels', { contact_p: id('Contact', 'contact_p'), name_p: text('Name') }),
     opportunity_p: object('Opportunity', {
       name_p: text('Name', { required: true }),
@@ -126,8 +131,10 @@ const TARGET = {
     'contact_role_p.role_p': [{ name: 'decision_maker_p', label: 'Decision Maker' }, { name: 'champion_p', label: 'Champion' }],
     // Object-dependent: each item names the objects whose records it may be used on.
     team_role_p: [{ name: 'account_manager_p', label: 'Account Manager', parentObjects: ['account_p'] }, { name: 'sales_rep_p', label: 'Sales Rep', parentObjects: ['opportunity_p'] }],
-    currency_code_p: [{ name: 'usd_p', label: 'USD' }, { name: 'eur_p', label: 'EUR' }]
-  }
+    currency_code_p: [{ name: 'usd_p', label: 'USD' }, { name: 'eur_p', label: 'EUR' }],
+    industry_p: [{ name: 'biotech_p', label: 'Biotechnology' }]
+  },
+  currencies: ['usd_p'] // the codes with a currency_p record on the instance
 }
 TARGET.picklists = Object.fromEntries(Object.entries(TARGET.picklistItems).map(([n, items]) => [n, items.map((i) => i.name)]))
 
@@ -222,9 +229,8 @@ test('lengths, ranges and the record currency come from the target describe', t 
   assert.deepEqual(cc.map, { USD: 'usd_p', EUR: 'eur_p' })
   assert.match(cc.todo, /XAU/)
   assert.ok(!opp.fields.some((e) => e.from === 'CurrencyIsoCode' && e.drop), 'CurrencyIsoCode is mapped, not also dropped')
-  // website_p caps at 120 by the describe; Salesforce allows 255.
-  const gaps = entry('Account').report.find((r) => r.source === 'Website')
-  assert.equal(gaps.gap, 'may not fit')
+  // A url field is normalized by the loader (https://, cut to fit or blank), not left to fail.
+  assert.equal(to(entry('Account'), 'website_p').normalize, 'url')
 })
 
 test('without CurrencyIsoCode, the record currency is a todo, not a silent rejection', t => {
@@ -297,4 +303,143 @@ test('what the user must hear: addresses are records, derived objects are not lo
   assert.match(entry('ContactChannel__c').todo, /Aspen derives contact_channel_p .*Don't load it/)
   assert.match(entry('Lead').note, /creates a contact for each lead it cannot match/)
   assert.match(gaps, /\*\*Note:\*\* lead_p is/)
+})
+
+// ---- a Salesforce export on disk, as export_g17.py writes it
+
+const rawField = (name, type, o = {}) => ({
+  name, label: o.label ?? name, type, nillable: true, defaultedOnCreate: false, createable: o.createable ?? true, unique: false,
+  referenceTo: o.to ?? [], relationshipName: o.rel ?? null, picklistValues: (o.values ?? []).map((value) => ({ value, active: true })),
+  length: o.length ?? 0, calculated: false, externalId: false
+})
+const rawObject = (name, keyPrefix, fields) => ({
+  name, label: name, keyPrefix, custom: false,
+  fields: [rawField('Id', 'id', { createable: false }), rawField('CreatedDate', 'datetime', { createable: false }), ...fields]
+})
+const EXPORT = {
+  Account: [rawObject('Account', '001', [rawField('Name', 'string', { label: 'Account Name' }), rawField('Website', 'url', { length: 255 }),
+    rawField('OwnerId', 'reference', { to: ['User'], rel: 'Owner' }), rawField('Industry', 'picklist', { values: ['Biotechnology', 'Banking', 'Retail'] }),
+    rawField('ParentId', 'reference', { to: ['Account'], rel: 'Parent', label: 'Parent Account ID' })]),
+  'Id,Name,Website,OwnerId,Industry,ParentId,CreatedDate\n' +
+  '001A,"Acme,\nInc.",acme.com,005U1,Biotechnology,,2020-01-01T00:00:00.000Z\n' +
+  '001B,"Beta ""B""",https://beta.io,005U2,Biotechnology,001X,2020-01-02T00:00:00.000Z\n' +
+  '001C,Gamma,,005U1,Banking,001A,2020-01-03T00:00:00.000Z\n'],
+  Contact: [rawObject('Contact', '003', [rawField('LastName', 'string', { label: 'Last Name' }), rawField('Email', 'email'),
+    rawField('Phone', 'phone', { label: 'Business Phone' }), rawField('MobilePhone', 'phone', { label: 'Mobile Phone' }),
+    rawField('AccountId', 'reference', { to: ['Account'], rel: 'Account' }), rawField('OwnerId', 'reference', { to: ['User'], rel: 'Owner' }),
+    rawField('Linkedin_Profile__c', 'url', { label: 'LinkedIn Profile', length: 255 })]),
+  'Id,LastName,Email,Phone,MobilePhone,AccountId,OwnerId,Linkedin_Profile__c,CreatedDate\n' +
+  '003A,Lee,ada@x.com,(415) 555-0100,(415) 555-0100,001A,005U1,http://linkedin.com/in/ada/?trk=1,2021-01-01T00:00:00.000Z\n' +
+  '003B,Kim,bo@x.com,11 98765 4321,,001B,005U2,,2021-01-02T00:00:00.000Z\n'],
+  Opportunity: [rawObject('Opportunity', '006', [rawField('Name', 'string'), rawField('AccountId', 'reference', { to: ['Account'], rel: 'Account' }),
+    rawField('Amount', 'currency'), rawField('CurrencyIsoCode', 'picklist', { label: 'Opportunity Currency', values: ['USD', 'EUR', 'JPY'] })]),
+  'Id,Name,AccountId,Amount,CurrencyIsoCode,CreatedDate\n006A,One,001A,1000,USD,2022-01-01T00:00:00.000Z\n006B,Two,001B,2000,EUR,2022-01-02T00:00:00.000Z\n006C,Three,001A,,USD,2022-01-03T00:00:00.000Z\n'],
+  Task: [rawObject('Task', '00T', [rawField('Subject', 'combobox', { values: ['Call', 'Email'] }),rawField('OwnerId', 'reference', { to: ['Group', 'User'], rel: 'Owner' })]),
+    'Id,Subject,OwnerId,CreatedDate\n00TA,Call,005U1,2023-01-01T00:00:00.000Z\n00TB,Email,005U2,2023-01-02T00:00:00.000Z\n'],
+  TaskRelation: [rawObject('TaskRelation', '0RT', [rawField('TaskId', 'reference', { to: ['Task'], rel: 'Task' }),
+    rawField('RelationId', 'reference', { to: ['Contact', 'Lead', 'User'], rel: 'Relation' }), rawField('IsWhat', 'boolean')]),
+  'Id,TaskId,RelationId,IsWhat,CreatedDate\n0RTA,00TA,003A,false,2023-01-01T00:00:00.000Z\n0RTB,00TA,00QX,false,2023-01-01T00:00:00.000Z\n0RTC,00TB,001A,true,2023-01-02T00:00:00.000Z\n']
+}
+
+function fromExport (t) {
+  const root = mkdtempSync(join(tmpdir(), 'sfmigrate export '))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  mkdirSync(join(root, '.aspen'))
+  writeFileSync(join(root, '.aspen', 'config.toml'), `instance = "${URL}"\n`)
+  const dir = join(root, 'export')
+  mkdirSync(join(dir, 'describe'), { recursive: true })
+  for (const [name, [describe, csv]] of Object.entries(EXPORT)) {
+    writeFileSync(join(dir, 'describe', `${name}.json`), JSON.stringify(describe))
+    writeFileSync(join(dir, `${name}.csv`), csv)
+  }
+  writeFileSync(join(dir, 'User.csv'), 'Id,Email\n005U1,a@x.com\n005U2,b@x.com\n')
+  const manifest = { org: 'acme', started: 's1', finished: 'f1', objects: Object.keys(EXPORT).map((object) => ({ object, status: 'ok', records: 3 })) }
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest))
+  const ws = join(root, 'data', 'migrations', 'acme')
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8' })
+  const mapping = () => JSON.parse(readFileSync(join(ws, 'mapping.json'), 'utf8'))
+  const lines = (f) => readFileSync(join(ws, 'extract', f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  return { root, dir, ws, run, mapping, lines, manifest }
+}
+
+test('an export on disk is the whole source: plan reads its describe and CSVs, and asks only about values the data holds', t => {
+  const x = fromExport(t)
+  const init = x.run('init', x.ws, '--from-export', x.dir)
+  assert.equal(init.status, 0, init.stderr)
+  assert.match(init.stdout, /Opportunity: 3 records/)
+  assert.match(init.stdout, /ask the user which of these objects to migrate/)
+  mkdirSync(join(x.ws, 'schema'), { recursive: true })
+  writeFileSync(join(x.ws, 'schema', 'target.json'), JSON.stringify(TARGET))
+  const plan = x.run('plan', x.ws, '--objects', 'Account,Contact,Opportunity,Task,TaskRelation', '--keep-target')
+  assert.equal(plan.status, 0, plan.stderr)
+  const fill = JSON.parse(readFileSync(join(x.ws, 'schema', 'fill.json'), 'utf8'))
+  assert.equal(fill.source, 'export')
+  assert.deepEqual(fill.objects.Account.fields.Industry.values, { Biotechnology: 2, Banking: 1 })
+  const m = x.mapping()
+  const entry = (source) => m.objects.find((o) => o.source === source)
+  // Retail is a Salesforce value no record holds: no question about it.
+  const industry = to(entry('Account'), 'industry_p')
+  assert.deepEqual(industry.map, { Biotechnology: 'biotech_p' })
+  assert.match(industry.todo, /Banking \(1\)/)
+  assert.doesNotMatch(industry.todo, /Retail/)
+  // Phones and URLs are normalized by the loader; the CRM's own rules come with them.
+  const contact = entry('Contact')
+  assert.equal(to(contact, 'office_phone_p').normalize, 'phone')
+  assert.equal(to(contact, 'office_phone_p').distinctFrom, 'mobile_phone_p')
+  assert.equal(to(contact, 'linkedin_profile_p').normalize, 'linkedin')
+  assert.equal(from(contact, 'OwnerId').drop, true, "Aspen makes the loader a new contact's owner")
+  assert.match(from(contact, 'OwnerId').note, /person loading/)
+  // A parent outside the export is blank, not a failure; a relation's own task is not optional.
+  assert.deepEqual(to(entry('Account'), 'parent_account_p'), { target: 'parent_account_p', from: 'ParentId', lookup: 'Account', missing: 'null' })
+  assert.equal(to(entry('TaskRelation'), 'parent_p').missing, undefined)
+  // A combobox is free text with suggestions: it maps onto a text field without a question.
+  assert.deepEqual(to(entry('Task'), 'subject_p'), { target: 'subject_p', from: 'Subject' })
+  // EUR has a currency_code_p item but no currency_p record on the target.
+  assert.match(to(entry('Opportunity'), 'ccode_p').todo, /EUR \(1\).*CurrencyIsoCode IN \('USD'\)/)
+})
+
+test('extract converts the export: quoted values, a filtered relation, its parent field, and owners from User.csv', t => {
+  const x = fromExport(t)
+  assert.equal(x.run('init', x.ws, '--from-export', x.dir).status, 0)
+  mkdirSync(join(x.ws, 'schema'), { recursive: true })
+  writeFileSync(join(x.ws, 'schema', 'target.json'), JSON.stringify(TARGET))
+  assert.equal(x.run('plan', x.ws, '--objects', 'Account,Contact,Task,TaskRelation', '--keep-target').status, 0)
+  const m = x.mapping()
+  for (const o of m.objects) { delete o.todo; for (const e of o.fields) { if (e.todo && !e.target) e.drop = true; delete e.todo } }
+  writeFileSync(join(x.ws, 'mapping.json'), JSON.stringify(m))
+  const r = x.run('extract', x.ws)
+  assert.equal(r.status, 0, r.stderr)
+  const accounts = x.lines('Account.jsonl')
+  assert.deepEqual(accounts.map((a) => a.Name), ['Acme,\nInc.', 'Beta "B"', 'Gamma'])
+  assert.equal(accounts[2].Website, null, 'a blank cell is null')
+  assert.equal(accounts[0].ct_p, '2020-01-01T00:00:00.000Z')
+  // IsWhat = false AND Relation.Type = 'Contact': the lead and the IsWhat row are left out.
+  const rel = x.lines('TaskRelation.jsonl')
+  assert.deepEqual(rel.map((r) => r.id_p), ['0RTA'])
+  assert.equal(rel[0]['Task.Subject'], 'Call')
+  assert.deepEqual(JSON.parse(readFileSync(join(x.ws, 'extract', 'match', 'team_p.email_p.json'), 'utf8')), { '005U1': 'a@x.com', '005U2': 'b@x.com' })
+
+  // An export regenerated since init is refused: the mapping describes the old one.
+  writeFileSync(join(x.dir, 'manifest.json'), JSON.stringify({ ...x.manifest, finished: 'f2' }))
+  const stale = x.run('extract', x.ws)
+  assert.equal(stale.status, 2)
+  assert.match(stale.stderr, /changed since init/)
+})
+
+test('draft drafts again an object that had no target, once the target has one', t => {
+  const root = mkdtempSync(join(tmpdir(), 'sfmigrate '))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  mkdirSync(join(root, '.aspen'))
+  writeFileSync(join(root, '.aspen', 'config.toml'), `instance = "${URL}"\n`)
+  const ws = join(root, 'data', 'migrations', 'acme')
+  mkdirSync(join(ws, 'schema'), { recursive: true })
+  const stale = { source: 'Product2', target: null, todo: 'no Aspen object matches Product2', fields: [] }
+  writeFileSync(join(ws, 'mapping.json'), JSON.stringify({ source: { kind: 'salesforce', org: 'acme' }, target: { url: URL }, objects: [stale] }))
+  writeFileSync(join(ws, 'schema', 'source.json'), JSON.stringify(SOURCE))
+  writeFileSync(join(ws, 'schema', 'target.json'), JSON.stringify(TARGET))
+  const r = spawnSync(process.execPath, [script, 'draft', ws, '--objects', 'Product2'], { cwd: root, encoding: 'utf8' })
+  assert.equal(r.status, 0, r.stderr)
+  const m = JSON.parse(readFileSync(join(ws, 'mapping.json'), 'utf8'))
+  assert.equal(m.objects.length, 1)
+  assert.equal(m.objects[0].target, 'product_p')
 })

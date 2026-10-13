@@ -39,7 +39,7 @@ compile or deploy correctly until it is resolved (`diagnose`).
 | 5 | Compile, deploy through the check-in chain, prove it with a record round-trip | `build-and-deploy` |
 | — | A compile, check-in, or the instance behaves unexpectedly | `diagnose` |
 | — | Records (and the objects and fields they need) from another Aspen instance | `instance-migration` |
-| — | Records from a Salesforce org | `salesforce-migration` |
+| — | Records from a Salesforce org or a Salesforce export (CSVs) | `salesforce-migration` |
 
 Steps 1 and 2 come before the first file, while they are cheap: metadata can't be deleted yet.
 Skip them when the tier is settled — a label, one picklist item, fixing what you authored last

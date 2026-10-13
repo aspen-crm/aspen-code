@@ -2,12 +2,17 @@
 // Read a Salesforce org, map one or more of its objects onto this Aspen instance's data model,
 // report the gaps, and write the extract that instance-migration's migrate.mjs loads.
 //
-//   node sfmigrate.mjs init <workspace> --org <alias|username>
+//   node sfmigrate.mjs init <workspace> --from-export <dir> | --org <alias|username>
+//   node sfmigrate.mjs plan <workspace> --objects Account,Contact   describe both sides, probe, draft
 //   node sfmigrate.mjs describe <workspace> --objects Account,Contact   SFDC describe -> schema/source.json
 //   node sfmigrate.mjs probe <workspace> [--sample 500]   which fields actually hold data -> schema/fill.json
-//   node sfmigrate.mjs draft <workspace>                mapping.json + the gap report
+//   node sfmigrate.mjs draft <workspace> [--redraft]    mapping.json + the gap report
 //   node sfmigrate.mjs gaps <workspace>                 re-report after settling todos
 //   node sfmigrate.mjs extract <workspace> [--limit N]  SFDC records -> extract/
+//
+// With --from-export the source is a Salesforce export on disk (manifest.json, describe/<Object>.json
+// and one CSV per object, as export_g17.py writes it) and Salesforce is not reached at all: describe,
+// probe and extract read the files, so a filtered or date-shifted export loads exactly as it is.
 //
 // Then the Aspen side is migrate.mjs in the instance-migration skill, unchanged:
 //   node migrate.mjs describe <workspace> --side target      (before draft)
@@ -22,10 +27,14 @@
 // workspace, the mapping or the CLI is not ready.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { pathToFileURL } from 'node:url'
+import { StringDecoder } from 'node:string_decoder'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { TARGET_RULES } from '../../instance-migration/scripts/migrate.mjs'
+
+const MIGRATE = fileURLToPath(new URL('../../instance-migration/scripts/migrate.mjs', import.meta.url))
 
 const IGNORED = ['extract/', 'idmap/', 'errors/', 'schema/']
 // Salesforce owns these: they are not writable on insert, and Aspen stamps its own.
@@ -37,17 +46,20 @@ const SF_SYSTEM = new Set([
 
 const HELP = `Map a Salesforce object onto this Aspen instance and build the extract.
 
-  node sfmigrate.mjs init <workspace> --org <alias|username>
+  node sfmigrate.mjs init <workspace> --from-export <dir>    a Salesforce export on disk
+  node sfmigrate.mjs init <workspace> --org <alias|username> a live org through the sf CLI
+  node sfmigrate.mjs plan <workspace> --objects <SFDC objects> [--keep-target] [--redraft]
+      describe, the Aspen target's describe (one browser sign-in), probe and draft in one run
   node sfmigrate.mjs describe <workspace> --objects <SFDC objects, comma-separated>
   node sfmigrate.mjs probe <workspace> [--objects <subset>] [--sample 500]
-  node sfmigrate.mjs draft <workspace> [--objects <subset>]
+  node sfmigrate.mjs draft <workspace> [--objects <subset>] [--redraft]
   node sfmigrate.mjs gaps <workspace>
   node sfmigrate.mjs extract <workspace> [--limit N] [--mode bulk|rest]
 
-The Aspen side stays with the instance-migration skill's migrate.mjs: run its
-\`describe <workspace> --side target\` before draft, then load, pilot and verify.
+The Aspen side stays with the instance-migration skill's migrate.mjs: load, pilot and verify.
 
-Salesforce is reached through the \`sf\` CLI only. Nothing is written to Salesforce.`
+Salesforce is reached through the \`sf\` CLI only, and not at all for an export. Nothing is written
+to Salesforce.`
 
 class Stop extends Error {
   constructor (message, code = 2) { super(message); this.code = code }
@@ -60,6 +72,158 @@ const writeText = (p, t) => { mkdirSync(dirname(p), { recursive: true }); writeF
 const writeLines = (p, rows) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, rows.map((r) => JSON.stringify(r) + '\n').join('')) }
 const chunksOf = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n))
 const sameUrl = (a, b) => String(a).trim().replace(/\/+$/, '').toLowerCase() === String(b).trim().replace(/\/+$/, '').toLowerCase()
+const list = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean)
+
+// ---- a Salesforce export on disk: manifest.json, describe/<Object>.json, <Object>.csv
+
+function readExport (dir) {
+  const file = join(dir, 'manifest.json')
+  if (!existsSync(file)) throw new Stop(`${dir} has no manifest.json; point --from-export at the export's own directory`)
+  const man = readJson(file)
+  const objects = {}
+  for (const o of man.objects ?? []) {
+    if (o.status && o.status !== 'ok') continue
+    if (existsSync(join(dir, `${o.object}.csv`))) objects[o.object] = { records: o.records ?? null }
+  }
+  // The owners' emails, when the export carries them: owner lookups then need no live org.
+  if (!objects.User && existsSync(join(dir, 'User.csv'))) objects.User = { records: null }
+  if (!Object.keys(objects).length) throw new Stop(`${file} lists no object with a CSV beside it`)
+  return { dir, org: man.org ?? null, started: man.started ?? null, finished: man.finished ?? null, dateShiftYears: man.date_shift_years ?? null, objects }
+}
+
+// The export this workspace was set up from, refused if it was regenerated since: a mapping drafted
+// from one export says nothing reliable about another.
+function exportOf (m) {
+  const x = m.source?.export
+  if (!x) return null
+  const now = readExport(x.dir)
+  if (now.started !== x.started || now.finished !== x.finished) throw new Stop(`the export in ${x.dir} changed since init (finished ${x.finished}, now ${now.finished}): run init again, then plan`)
+  return x
+}
+
+const exportCsv = (x, object) => {
+  const file = join(x.dir, `${object}.csv`)
+  if (!existsSync(file)) throw new Stop(`the export in ${x.dir} has no ${object}.csv`)
+  return file
+}
+
+// RFC 4180, streamed so a large export never sits in memory: a quoted field may hold commas,
+// doubled quotes and newlines. Each row comes back keyed by the header.
+function * csvRecords (file) {
+  const fd = openSync(file, 'r'); const buf = Buffer.alloc(1 << 20); const dec = new StringDecoder('utf8')
+  let header = null; let row = []; let field = ''; let quoted = false; let quote = false
+  const done = () => { row.push(field.endsWith('\r') && !quoted ? field.slice(0, -1) : field); const r = row; row = []; field = ''; return r }
+  const emit = (r) => { if (!header) { header = r.map((h, i) => i ? h : h.replace(/^\uFEFF/, '')); return null } return Object.fromEntries(header.map((h, i) => [h, r[i] ?? ''])) }
+  try {
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) {
+      for (const c of dec.write(buf.subarray(0, n))) {
+        if (quote) { quote = false; if (c === '"') { field += c; continue } quoted = false }
+        if (quoted) { if (c === '"') quote = true; else field += c; continue }
+        if (c === '"' && field === '') quoted = true
+        else if (c === ',') { row.push(field); field = '' } else if (c === '\n') { const r = emit(done()); if (r) yield r } else field += c
+      }
+    }
+    if (field !== '' || row.length) { const r = emit(done()); if (r) yield r }
+  } finally { closeSync(fd) }
+}
+
+// Standard Salesforce key prefixes, for an object the export does not describe.
+const KEY_PREFIX = { '001': 'Account', '003': 'Contact', '005': 'User', '006': 'Opportunity', '00Q': 'Lead', '00T': 'Task', '00U': 'Event', '500': 'Case', '00G': 'Group' }
+
+// The `where` draft writes, evaluated on an export's rows: clauses joined by AND, each
+// `Field = v`, `!=`, `IN (...)` or `NOT IN (...)`, or `Rel.Type = 'Object'` (the object the row's
+// lookup points at, by its id's key prefix). Anything else is refused rather than guessed at.
+function exportFilter (where, S, src, object) {
+  if (!where) return () => true
+  const lit = (t) => { t = t.trim(); const q = /^'(.*)'$/.exec(t); return q ? q[1].replace(/\\'/g, "'") : /^null$/i.test(t) ? '' : t.toLowerCase() === 'true' || t.toLowerCase() === 'false' ? t.toLowerCase() : t }
+  const typeOf = (id) => {
+    const pre = String(id ?? '').slice(0, 3)
+    return Object.entries(src.objects).find(([, o]) => o.keyPrefix === pre)?.[0] ?? KEY_PREFIX[pre] ?? ''
+  }
+  const tests = where.split(/\s+AND\s+/i).map((clause) => {
+    const c = /^\s*\(?\s*([\w.]+)\s*(=|!=|NOT\s+IN|IN)\s*(.+?)\s*\)?\s*$/i.exec(clause)
+    if (!c) throw new Stop(`${object}: an export cannot be filtered by \`${clause.trim()}\`; filter the export itself, or write the where as Field = value, IN (...) or Rel.Type = 'Object' clauses`)
+    const [, path, op, rest] = c
+    const want = /IN/i.test(op) ? rest.replace(/^\(|\)$/g, '').split(',').map(lit) : [lit(rest)]
+    const typed = /^(\w+)\.Type$/.exec(path)
+    let get
+    if (typed) {
+      const fk = Object.entries(S?.fields ?? {}).find(([, f]) => f.sf.relationshipName === typed[1])?.[0]
+      if (!fk) throw new Stop(`${object}: where names ${path}, but ${object} has no relationship ${typed[1]}`)
+      get = (r) => typeOf(r[fk])
+    } else if (path.includes('.')) throw new Stop(`${object}: an export cannot be filtered by the parent field ${path}`)
+    else get = (r) => { if (!(path in r)) throw new Stop(`${object}: where names ${path}, which the export has no column for`); return r[path] }
+    const has = (r) => want.includes(get(r))
+    return /^(=|IN)$/i.test(op) ? has : (r) => !has(r)
+  })
+  return (r) => tests.every((t) => t(r))
+}
+
+// One object's rows from the export, in the shape extract writes: the Salesforce Id in id_p,
+// CreatedDate in ct_p, a blank cell as null. A parent's field (Task.Subject on a TaskRelation) is
+// joined from the parent's own CSV through the row's lookup to it (TaskId).
+function exportRows (x, o, fields, src, limit) {
+  const S = src.objects[o.source]
+  const keep = exportFilter(o.where, S, src, o.source)
+  const joins = {}
+  for (const f of fields.filter((f) => f.includes('.'))) {
+    const [rel, col] = f.split('.')
+    const [fk, def] = Object.entries(S.fields).find(([, d]) => d.sf.relationshipName === rel) ?? []
+    if (!fk) throw new Stop(`${o.source}: "${f}" names no relationship ${rel} on ${o.source}`)
+    ;(joins[rel] ??= { fk, parent: def.sf.referenceTo[0], cols: new Set() }).cols.add(col)
+  }
+  for (const j of Object.values(joins)) {
+    j.rows = new Map()
+    for (const r of csvRecords(exportCsv(x, j.parent))) j.rows.set(r.Id, r)
+  }
+  const out = []
+  let checked = false
+  for (const r of csvRecords(exportCsv(x, o.source))) {
+    if (!checked) {
+      const missing = fields.filter((f) => !f.includes('.') && !(f in r))
+      if (missing.length) throw new Stop(`${o.source}: the export has no column for ${missing.join(', ')}; export it, or drop it from the mapping`)
+      checked = true
+    }
+    if (!keep(r)) continue
+    const row = { id_p: r.Id }
+    if (r.CreatedDate) row.ct_p = r.CreatedDate
+    for (const f of fields) {
+      let v = r[f]
+      if (f.includes('.')) { const [rel, col] = f.split('.'); v = joins[rel].rows.get(r[joins[rel].fk])?.[col] }
+      row[f] = v === undefined || v === '' ? null : v
+    }
+    out.push(row)
+    if (limit && out.length >= limit) break
+  }
+  return out
+}
+
+// How full each field is, its longest value, and how often each picklist value occurs: what draft
+// asks about, and only for what the data holds.
+function profile (rows, S, names, into = { records: 0, fields: {} }) {
+  const acc = {}
+  for (const f of names) acc[f] = { n: 0, maxLen: 0, values: S.fields[f]?.picklist ? {} : null }
+  let records = 0
+  for (const r of rows) {
+    records++
+    for (const f of names) {
+      const v = r[f]
+      if (v === null || v === undefined || v === '') continue
+      const a = acc[f]; a.n++; a.maxLen = Math.max(a.maxLen, String(v).length)
+      if (a.values && Object.keys(a.values).length < 500) a.values[v] = (a.values[v] ?? 0) + 1
+    }
+  }
+  into.records = Math.max(into.records, records)
+  for (const [f, a] of Object.entries(acc)) into.fields[f] = { fill: records ? a.n / records : 0, maxLen: a.maxLen, ...(a.values ? { values: a.values } : {}) }
+  return into
+}
+
+// The Aspen half of plan: the instance-migration skill's describe, which signs in through the browser.
+function describeTarget (ws) {
+  say('== target: the Aspen instance (sign in through the browser tab that opens)')
+  const r = spawnSync(process.execPath, [MIGRATE, 'describe', ws.dir, '--side', 'target'], { stdio: 'inherit', cwd: ws.root })
+  if (r.status !== 0) throw new Stop(`describing the target failed (exit ${r.status}); run migrate.mjs describe <workspace> --side target to see why`, r.status || 1)
+}
 
 // ---- the sf CLI. It owns the credentials; we only ever read.
 
@@ -340,8 +504,15 @@ const PLATFORM = {
 
 // ---- describe: one normalized schema for the source, in migrate.mjs's shape
 
-function describeObject (ws, m, name) {
-  const d = sf(['sobject', 'describe', '--sobject', name, ...org(ws, m)])
+const describeObject = (ws, m, name) => normalizeDescribe(sf(['sobject', 'describe', '--sobject', name, ...org(ws, m)]), name)
+
+function describeFromExport (x, name) {
+  const file = join(x.dir, 'describe', `${name}.json`)
+  if (!existsSync(file)) throw new Stop(`the export has no describe/${name}.json; re-export ${name}, or describe it from the live org (init --org)`)
+  return normalizeDescribe(readJson(file), name)
+}
+
+function normalizeDescribe (d, name) {
   const fields = {}
   const picklists = {}
   for (const f of d.fields ?? []) {
@@ -374,7 +545,7 @@ function describeObject (ws, m, name) {
       }
     }
   }
-  return { object: { label: d.label ?? name, custom: !!d.custom, fields }, picklists }
+  return { object: { label: d.label ?? name, custom: !!d.custom, keyPrefix: d.keyPrefix ?? null, fields }, picklists }
 }
 
 // ---- draft: propose a target field for every source field, and a category for every gap
@@ -447,12 +618,15 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
   // The junction's fields whose target its name does not say.
   const forced = junction ? { [junction.parent]: 'what', [junction.role]: 'role', ...(junction.member ? { [junction.member]: 'team' } : {}) }
     : part ? { [part.parent]: 'parent', [part.person]: 'who' } : {}
-  if (!T) entry.todo = `no Aspen object matches ${name} by name: read the object descriptions in schema/target.json and set "target" to the one that holds what ${name} holds (ask the user when none clearly does), or create one (lean-data-model -> model-first -> metadata -> build-and-deploy), then describe the target again`
+  if (!T) entry.todo = `no Aspen object matches ${name} by name. Read the object descriptions in schema/target.json: if one holds what ${name} holds, set "target" to it; otherwise skip ${name} (remove it from the mapping). Creating an object is the user's call, offered last: it cannot be deleted yet`
   const idx = T ? targetIndex(T) : null
   const filled = fill?.objects?.[name]?.fields ?? null
   // fill.json held a bare number before max lengths were recorded.
   const rate = (f) => { const v = filled?.[f]; return v == null ? 0 : (typeof v === 'number' ? v : v.fill) }
   const observed = (f) => { const v = filled?.[f]; return (v == null || typeof v === 'number') ? null : v.maxLen }
+  // The values the data actually holds, with how often: only those need a target value.
+  const used = (f) => { const v = filled?.[f]; return v && typeof v === 'object' && v.values ? v.values : null }
+  const valuesOf = (fname, f) => { const c = used(fname); return c ? Object.keys(c).sort((a, b) => c[b] - c[a]) : src.picklists[f.picklist] ?? [] }
   const rows = []
   const fields = []
   const dependent = []
@@ -522,7 +696,11 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
       const to = refs[0]
       if (migrating.has(to)) {
         e.lookup = to
-        row.confidence = 'exact'; row.note = `lookup to ${to}, which is migrating: resolved through the id map`
+        // A scoped extract points past its own edge (a parent account not exported): blank, not a
+        // failure. Not for the row's own parent (a relation's task): without it the row is not one.
+        const optional = !tf.required && !Object.hasOwn(forced, fname) && tf.subtype !== 'parent'
+        if (optional) e.missing = 'null'
+        row.confidence = 'exact'; row.note = `lookup to ${to}, which is migrating: resolved through the id map${optional ? `; blank when that ${to} is not in the extract` : ''}`
       } else if (to === 'User') {
         const on = userMatch(tgt, tf.lookup)
         if (on) {
@@ -543,25 +721,30 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
         row.note = `points to ${to}, which is not in this migration`
         e.todo = `${fname} points to ${to}, which is not migrated: add ${to} to --objects, match it ({"lookup": {"object": "<target object>", "match": "<field>"}, "sfMatch": {"object": "${to}", "field": "<SFDC field>"}}), or drop it`
       }
-    } else if (tf.type !== f.type) {
+    } else if (tf.type !== f.type && !(f.sf.type === 'combobox' && tf.type === 'text')) {
       row.gap = 'type mismatch'; row.decision = 'todo'
       row.note = `${f.sf.type} in Salesforce, ${tf.type}/${tf.subtype} on ${tname}`
       e.todo = `types differ: ${f.sf.type} in Salesforce, ${tf.type} on ${tname}. Convert it ("expr"), pick another field, or drop it.`
     } else if (f.picklist && tf.picklist) {
-      settlePicklist(e, row, src.picklists[f.picklist] ?? [], tgt, tf, null)
-      if (tf.dependsOn) dependent.push({ e, row, values: src.picklists[f.picklist] ?? [], tf })
+      const values = valuesOf(fname, f)
+      settlePicklist(e, row, values, tgt, tf, null, used(fname))
+      if (tf.dependsOn) dependent.push({ e, row, values, counts: used(fname), tf })
     } else if (f.sf.type === 'percent' && tf.maxValue != null && Number(tf.maxValue) <= 1) {
       // Salesforce holds 50% as 50; the describe says the target takes a fraction.
       delete e.from
       e.expr = `r.${fname} == null ? null : Number(r.${fname}) / 100`
       row.confidence = 'close'; row.gap = 'percent as a fraction'
       row.note = `Salesforce holds a percent as 0-100 and ${tname} takes ${tf.minValue ?? 'up'} to ${tf.maxValue}: divided by 100`
+    } else if (tf.subtype === 'phone' || tf.subtype === 'url') {
+      // Salesforce is laxer than Aspen here; the loader converts what it can without guessing.
+      e.normalize = TARGET_RULES[target]?.normalize?.[tname] ?? tf.subtype
+      row.confidence = 'close'; row.gap = `normalize ${e.normalize}`
+      row.note = NORMALIZE_NOTE[e.normalize]
     } else if (f.type === 'text' && tf.type === 'text' && overLength(f, tf, tname, observed(fname), row)) {
-      // overLength filled the row in; nothing more to decide here.
-    } else if (['url', 'email', 'phone'].includes(tf.subtype)) {
-      const takes = { phone: 'only E.164 (+ and up to 15 digits)', url: 'only an http or https URL', email: 'only a valid address' }[tf.subtype]
-      row.confidence = 'close'; row.gap = `validated ${tf.subtype}`
-      row.note = `${tname} takes ${takes}, and Salesforce is laxer. ${tf.subtype === 'email' ? 'The pilot shows what it rejects' : 'The dry run lists the rows it would reject'}: normalize them with "expr", or drop the field.`
+      e.truncate = true
+    } else if (tf.subtype === 'email') {
+      row.confidence = 'close'; row.gap = 'validated email'
+      row.note = `${tname} takes only a valid address, and Salesforce is laxer: the pilot shows what it rejects`
     } else {
       row.confidence = rule === 'name' ? 'exact' : 'close'
       if (rule !== 'name') row.note = `matched by ${rule}`
@@ -597,7 +780,7 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     const poly = on ? fields.find((x) => x.target === on.objectOf && x.lookup && !x.drop) : null
     const objs = !poly ? [] : typeof poly.lookup === 'object' && !Array.isArray(poly.lookup) ? [poly.lookup.object]
       : [].concat(poly.lookup).map((x) => pickTargetObject(x, src.objects[x]?.label ?? x, tgt)).filter(Boolean)
-    if (objs.length) settlePicklist(d.e, d.row, d.values, tgt, d.tf, objs)
+    if (objs.length) settlePicklist(d.e, d.row, d.values, tgt, d.tf, objs, d.counts)
   }
 
   // Aspen gives any object with a currency field a ccode_p, a lookup to currency_p, and refuses a
@@ -616,13 +799,21 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     Object.assign(row, { target: 'ccode_p', rule: 'currency', gap: 'record currency' })
     const iso = S.fields.CurrencyIsoCode
     if (lookup && iso) {
-      const values = src.picklists[iso.picklist] ?? []
-      const { map, missing } = seedPicklist(values, tgt.picklistItems?.[C.fields[code].picklist] ?? [])
+      const counts = used('CurrencyIsoCode')
+      const { map, missing } = seedPicklist(valuesOf('CurrencyIsoCode', iso), tgt.picklistItems?.[C.fields[code].picklist] ?? [])
       const e = { target: 'ccode_p', from: 'CurrencyIsoCode', map, lookup }
       const at = fields.findIndex((x) => x.from === 'CurrencyIsoCode' && x.drop)
       if (at >= 0) fields.splice(at, 1)
-      Object.assign(row, { confidence: 'close', decision: missing.length ? 'todo' : 'map', note: `a currency value needs the record's currency: CurrencyIsoCode matched to the ${cc.lookup} whose ${code} is labelled with it${missing.length ? `; no ${code} for ${missing.join(', ')}` : ''}` })
+      // The codes the data holds that the target has no currency_p record for: those rows fail.
+      const n = (v) => counts?.[v] ? ` (${counts[v]})` : ''
+      const lacking = counts && tgt.currencies ? Object.keys(counts).filter((v) => map[v] && !tgt.currencies.includes(map[v])) : []
+      const covered = counts ? Object.keys(counts).filter((v) => !lacking.includes(v) && map[v]) : []
+      const note = [`a currency value needs the record's currency: CurrencyIsoCode matched to the ${cc.lookup} whose ${code} is labelled with it`]
+      if (missing.length) note.push(`no ${code} for ${missing.map((v) => v + n(v)).join(', ')}`)
+      if (lacking.length) note.push(`the target has no ${cc.lookup} for ${lacking.map((v) => v + n(v)).join(', ')}`)
+      Object.assign(row, { confidence: 'close', decision: missing.length || lacking.length ? 'todo' : 'map', note: note.join('; ') })
       if (missing.length) e.todo = `no ${cc.lookup}.${code} is labelled ${missing.join(', ')}: add each to "map", or set "default"`
+      else if (lacking.length) e.todo = `${lacking.map((v) => v + n(v)).join(', ')} rows have no ${cc.lookup} on the target, so they would fail: keep only the others ("where": "CurrencyIsoCode IN (${covered.map((v) => `'${v}'`).join(', ')})" on ${name}), drop the currency fields, or add those currencies on the instance first`
       fields.push(e)
     } else {
       const why = lookup
@@ -633,9 +824,37 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     }
   }
 
+  // What the CRM triggers enforce that the describe does not declare (migrate.mjs TARGET_RULES).
+  const rules = T ? TARGET_RULES[target] ?? {} : {}
+  for (const [tname, why] of Object.entries(rules.setOnInsert ?? {})) {
+    const at = fields.findIndex((x) => x.target === tname && !x.drop)
+    if (at < 0) continue
+    fields[at] = { from: fields[at].from, drop: true, note: why }
+    for (const x of fields) if (x.objectOf === tname) Object.assign(x, { drop: true, note: why })
+    const row = rows.find((r) => r.target === tname)
+    if (row) Object.assign(row, { decision: 'drop', confidence: 'GAP', gap: 'set by Aspen', note: why })
+  }
+  for (const [a, b] of rules.distinct ?? []) {
+    const e = fields.find((x) => x.target === b && !x.drop)
+    if (!e || !fields.some((x) => x.target === a && !x.drop)) continue
+    const from = [...new Set([].concat(e.distinctFrom ?? [], a))]
+    e.distinctFrom = from.length === 1 ? from[0] : from
+    const row = rows.find((r) => r.target === b)
+    if (row) row.note = `${row.note ? `${row.note}; ` : ''}blank when it equals ${a}: Aspen refuses the same value in both`
+  }
+
   if (T) {
     for (const [fname, tf] of Object.entries(T.fields)) {
       if (tf.required && !fields.some((e) => e.target === fname && !e.drop)) {
+        // Salesforce computes some of what Aspen requires (a contact's Name): its value is data.
+        const same = Object.keys(S.fields).find((n) => !SF_SYSTEM.has(n) && normalize(n) === bare(fname))
+        if (same) {
+          const at = fields.findIndex((e) => e.from === same && e.drop)
+          if (at >= 0) fields.splice(at, 1)
+          fields.push({ target: fname, from: same })
+          rows.push({ source: same, label: S.fields[same].label, sfType: S.fields[same].sf.type, target: fname, rule: 'required', confidence: 'close', gap: null, decision: 'map', fill: rate(same), note: `required on ${target}; filled from ${same}, which Salesforce computes` })
+          continue
+        }
         fields.push({ target: fname, todo: `required on ${target} and nothing maps to it: set "from", "value" or "expr"` })
         rows.push({ source: '', label: tf.label, sfType: '', target: fname, rule: '', confidence: 'GAP', gap: 'required, unmapped', decision: 'todo', fill: null, note: `required on ${target}: needs a source field or a constant` })
       }
@@ -704,9 +923,11 @@ function polyMapping (ws, src, tgt, target, tname, fname, f, migrating) {
       row: { target: tname, confidence: 'close', gap: 'user lookup', decision: 'map', note: `matched to ${user.object}.${user.match} by email, blank when that person has no record on the target; ${on} follows${after}` }
     }
   }
-  if (!carried.length) {
-    return todo('lookup not migrating', `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}: ${waiting.length ? `migrate ${waiting.join(' or ')} too, or drop it` : 'none of those can go here: drop it'}`)
+  if (!carried.length && !waiting.length) {
+    const why = `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}${f.sf.referenceTo.includes('User') ? ' (matched by a unique email, which none of them has)' : ''}: nothing it points at can go here`
+    return { fields: [{ from: fname, drop: true, note: why }], row: { target: tname, gap: 'nothing to point at', decision: 'drop', note: why } }
   }
+  if (!carried.length) return todo('lookup not migrating', `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}: migrate ${waiting.join(' or ')} too, or drop it`)
   return {
     fields: [{ target: tname, from: fname, lookup: carried.length === 1 ? carried[0] : carried, ...(blank ? { missing: 'null' } : {}) }, { target: on, objectOf: tname }],
     row: { target: tname, confidence: after ? 'close' : 'exact', gap: after ? 'partly carried' : null, decision: 'map', note: `the ${carried.join(' or ')} it points at, through the id map; ${on} names its object${after}` }
@@ -722,22 +943,28 @@ function addressGap (ws, tgt, target, name) {
 }
 
 // A value longer than the target's cap is rejected on write. Compare the cap the describe declares
-// against what the sample actually holds, so the user decides before the dry run lists the rows.
+// against what the data holds; the proposal is to cut it to the cap ("truncate").
 function overLength (f, tf, tname, maxLen, row) {
   const cap = tf.maxLength
   if (!cap) return false
   const sfMax = f.sf.length ?? 0
   if (maxLen != null && maxLen > cap) {
-    row.confidence = 'close'; row.gap = 'too long for the target'
-    row.note = `the sample holds values up to ${maxLen} characters and ${tname} caps at ${cap}: those records are rejected at load. Truncate with "expr" (\`r.${row.source}?.slice(0, ${cap})\`), widen ${tname}, or drop the field.`
+    row.confidence = 'close'; row.gap = 'cut to fit'
+    row.note = `values run to ${maxLen} characters and ${tname} caps at ${cap}: cut to ${cap} ("truncate"). Drop the field instead if a cut value is no use.`
     return true
   }
   if (maxLen == null && sfMax > cap) {
     row.confidence = 'close'; row.gap = 'may not fit'
-    row.note = `Salesforce allows ${sfMax} characters and ${tname} caps at ${cap}; run \`sfmigrate probe\` to see the longest value actually stored`
+    row.note = `Salesforce allows ${sfMax} characters and ${tname} caps at ${cap}: anything longer is cut to ${cap} ("truncate")`
     return true
   }
   return false
+}
+
+const NORMALIZE_NOTE = {
+  phone: 'converted to E.164 where the number says its country (+, 00, or a 10-digit North American number); anything else is left blank, and the dry run counts it under "Changed on the way in"',
+  url: 'http or https; a value with no scheme gets https://. One that still does not fit is left blank, and the dry run counts it',
+  linkedin: "Aspen's own LinkedIn form (https://www.linkedin.com/in/<profile>); anything that is not a profile URL is left blank, as Aspen would refuse it"
 }
 
 // A picklist's map, seeded from the target's items: a Salesforce value matches an item by name or
@@ -751,19 +978,22 @@ function seedPicklist (values, items) {
 }
 
 // With `objs`, only the items an object-dependent picklist allows on every one of those objects.
-function settlePicklist (e, row, values, tgt, tf, objs) {
+// With `counts`, `values` are the ones the data holds, and each is shown with how often.
+function settlePicklist (e, row, values, tgt, tf, objs, counts = null) {
   const items = (tgt.picklistItems?.[tf.picklist] ?? []).filter((i) => !objs || !i.parentObjects || objs.every((o) => i.parentObjects.includes(o)))
   const { map, missing } = seedPicklist(values, items)
   const where = objs ? ` allows on ${objs.join(' and ')}` : ''
+  const shown = (v) => counts ? `${v} (${counts[v]})` : v
+  const which = counts ? 'values in the data' : 'values'
   e.map = map
   delete e.todo
   if (missing.length) {
     const names = items.map((i) => i.name)
     row.confidence = 'close'; row.gap = 'picklist values'; row.decision = 'todo'
-    row.note = `${missing.length} of ${values.length} values are not among those ${tf.picklist}${where || ' holds'}: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ', ...' : ''}`
-    e.todo = `values not among those ${tf.picklist}${where || ' holds'}: ${missing.join(', ')}. Add each to "map" (${names.slice(0, 12).join(', ')}${names.length > 12 ? ', ...' : ''}), or set "default".`
+    row.note = `${missing.length} of ${values.length} ${which} are not among those ${tf.picklist}${where || ' holds'}: ${missing.slice(0, 8).map(shown).join(', ')}${missing.length > 8 ? ', ...' : ''}`
+    e.todo = `${which} not among those ${tf.picklist}${where || ' holds'}: ${missing.map(shown).join(', ')}. Add each to "map" (${names.slice(0, 12).join(', ')}${names.length > 12 ? ', ...' : ''}), or set "default".`
   } else {
-    row.confidence = 'exact'; row.gap = null; row.decision = 'map'; row.note = `all ${values.length} values are among those ${tf.picklist}${where || ' holds'}`
+    row.confidence = 'exact'; row.gap = null; row.decision = 'map'; row.note = `all ${values.length} ${which} are among those ${tf.picklist}${where || ' holds'}`
   }
 }
 
@@ -780,7 +1010,9 @@ function report (ws, m, src, tgt, fill) {
   lines.push(`Source: \`${m.source.org}\` (${m.source.instanceUrl ?? 'Salesforce'})  `)
   lines.push(`Target: ${m.target.url}  `)
   lines.push(`Drafted: ${new Date().toISOString()}`)
-  lines.push(fill ? `Fill rates from a sample of ${fill.sample} records per object.\n` : 'No fill rates: run `sfmigrate probe` to see which Salesforce fields actually hold data.\n')
+  lines.push(!fill ? 'No fill rates: run `sfmigrate probe` to see which Salesforce fields actually hold data.\n'
+    : fill.source === 'export' ? 'Fill rates and picklist values from every record in the export.\n'
+      : `Fill rates from a sample of ${fill.sample} records per object.\n`)
   const headline = []
 
   for (const o of m.objects) {
@@ -906,14 +1138,18 @@ function main (argv) {
     const next = argv[i + 1]
     if (next && !next.startsWith('--')) { opts[key] = next; i++ } else opts[key] = true
   }
-  if (!['init', 'describe', 'probe', 'draft', 'gaps', 'extract'].includes(cmd)) throw new Stop(`unknown command ${cmd}\n\n${HELP}`)
+  if (!['init', 'plan', 'describe', 'probe', 'draft', 'gaps', 'extract'].includes(cmd)) throw new Stop(`unknown command ${cmd}\n\n${HELP}`)
   const ws = workspace(wsArg)
 
   if (cmd === 'init') {
-    if (!opts.org) throw new Stop('init needs --org: the sf CLI alias or username for the source org (`sf org list`)')
-    const o = sf(['org', 'display', '--target-org', String(opts.org)])
+    const dir = typeof opts['from-export'] === 'string' ? resolve(opts['from-export']) : null
+    if (!opts.org && !dir) throw new Stop('init needs --from-export <dir> (a Salesforce export: manifest.json, describe/ and one CSV per object) or --org <alias|username> (a live org through the sf CLI, `sf org list`)')
+    const x = dir ? readExport(dir) : null
+    const o = opts.org ? sf(['org', 'display', '--target-org', String(opts.org)]) : null
     const m = {
-      source: { kind: 'salesforce', org: String(opts.org), url: o.instanceUrl, username: o.username, instanceUrl: o.instanceUrl, apiVersion: o.apiVersion },
+      source: o
+        ? { kind: 'salesforce', org: String(opts.org), url: o.instanceUrl, username: o.username, instanceUrl: o.instanceUrl, apiVersion: o.apiVersion, ...(x ? { export: x } : {}) }
+        : { kind: 'salesforce', url: x.dir, export: x },
       target: { url: opts.target ? String(opts.target) : ws.instance },
       objects: []
     }
@@ -921,58 +1157,68 @@ function main (argv) {
     writeJson(ws.path('mapping.json'), m)
     writeText(ws.path('.gitignore'), IGNORED.join('\n') + '\n')
     say(`workspace ${ws.dir}`)
-    say(`source: ${o.username} at ${o.instanceUrl} (API ${o.apiVersion})`)
+    if (o) say(`source: ${o.username} at ${o.instanceUrl} (API ${o.apiVersion})`)
+    if (x) {
+      say(`source: the export in ${x.dir}${x.org ? ` (from ${x.org})` : ''}, finished ${x.finished ?? 'at an unknown time'}${x.dateShiftYears ? `, dates shifted ${x.dateShiftYears} years` : ''}`)
+      for (const [n, v] of Object.entries(x.objects)) say(`  ${n}: ${v.records ?? '?'} records`)
+    }
     say(`target: ${m.target.url}`)
-    say("next: sfmigrate describe <workspace> --objects <SFDC objects>, and migrate.mjs describe <workspace> --side target")
+    say('next: ask the user which of these objects to migrate, then sfmigrate plan <workspace> --objects <their choice>')
     return 0
   }
 
   const m = readMapping(ws)
 
+  if (cmd === 'plan') {
+    if (typeof opts.objects !== 'string') throw new Stop('plan needs --objects: the Salesforce objects the user chose to migrate, comma-separated')
+    let code = main(['describe', wsArg, '--objects', opts.objects])
+    if (code) return code
+    if (!(opts['keep-target'] && existsSync(ws.path('schema', 'target.json')))) describeTarget(ws)
+    code = main(['probe', wsArg, '--objects', opts.objects, ...(opts.sample ? ['--sample', String(opts.sample)] : [])])
+    if (code) return code
+    return main(['draft', wsArg, '--objects', opts.objects, ...(opts.redraft ? ['--redraft'] : [])])
+  }
+
   if (cmd === 'describe') {
-    if (!opts.objects) throw new Stop('describe needs --objects: the Salesforce objects to read, comma-separated')
-    const names = String(opts.objects).split(',').map((s) => s.trim()).filter(Boolean)
+    const x = exportOf(m)
+    if (!opts.objects && !x) throw new Stop('describe needs --objects: the Salesforce objects to read, comma-separated')
+    const names = opts.objects ? list(opts.objects) : Object.keys(x.objects).filter((n) => n !== 'User')
+    if (x) for (const n of names) if (!x.objects[n]) throw new Stop(`${n} is not in the export (${Object.keys(x.objects).join(', ')})`)
     const existing = existsSync(ws.path('schema', 'source.json')) ? readJson(ws.path('schema', 'source.json')) : { objects: {}, picklists: {} }
     const objects = { ...existing.objects }; const picklists = { ...existing.picklists }
     for (const n of names) {
-      const d = describeObject(ws, m, n)
+      const d = x ? describeFromExport(x, n) : describeObject(ws, m, n)
       objects[n] = d.object
       Object.assign(picklists, d.picklists)
       const gaps = Object.values(d.object.fields).filter((f) => gapOf(f)[0]).length
       say(`${n}: ${Object.keys(d.object.fields).length} fields, ${Object.keys(d.picklists).length} picklists, ${gaps} that need an ETL`)
     }
-    writeJson(ws.path('schema', 'source.json'), { org: m.source.org, instanceUrl: m.source.instanceUrl, described: new Date().toISOString(), objects, picklists })
+    writeJson(ws.path('schema', 'source.json'), { org: m.source.org ?? m.source.export?.org ?? null, instanceUrl: m.source.instanceUrl ?? null, export: m.source.export?.dir ?? null, described: new Date().toISOString(), objects, picklists })
     say(`schema/source.json: ${Object.keys(objects).length} object(s)`)
     return 0
   }
 
   if (cmd === 'probe') {
     const src = schema(ws, 'source')
-    const names = opts.objects ? String(opts.objects).split(',').map((s) => s.trim()).filter(Boolean) : Object.keys(src.objects)
+    const x = exportOf(m)
+    const names = opts.objects ? list(opts.objects) : Object.keys(src.objects)
     const sample = opts.sample ? Number(opts.sample) : 500
     if (!Number.isInteger(sample) || sample < 1) throw new Stop('--sample takes a whole number of records')
-    const out = { sample, probed: new Date().toISOString(), objects: {} }
+    // fill.json: objects.<Object>.fields.<Field> = { fill: 0..1, maxLen, values?: {<picklist value>: rows} }
+    const out = { source: x ? 'export' : 'org', sample: x ? null : sample, probed: new Date().toISOString(), objects: {} }
     for (const n of names) {
       const S = src.objects[n]
       if (!S) throw new Stop(`${n} is not in schema/source.json; run describe first`)
       // File bodies are huge and not queryable in bulk; everything else is fair game.
       const names2 = Object.entries(S.fields).filter(([f, d]) => f !== 'Id' && d.sf.type !== 'base64').map(([f]) => f)
-      const fields = {}
-      let records = 0
+      const p = { records: 0, fields: {} }
+      if (x) profile(csvRecords(exportCsv(x, n)), S, names2, p)
       // ORDER BY Id LIMIT N picks the same records in every chunk, so each chunk measures the
       // same sample. SOQL caps how many fields one query can carry.
-      for (const chunk of chunksOf(names2, 150)) {
-        const rows = query(ws, m, `SELECT Id, ${chunk.join(', ')} FROM ${n} ORDER BY Id LIMIT ${sample}`, 'rest')
-        records = Math.max(records, rows.length)
-        for (const f of chunk) {
-          const vals = rows.map((r) => r[f]).filter((v) => v !== null && v !== undefined && v !== '')
-          const maxLen = vals.reduce((n, v) => Math.max(n, String(v).length), 0)
-          fields[f] = { fill: rows.length ? vals.length / rows.length : 0, maxLen }
-        }
-      }
-      out.objects[n] = { records, fields }
-      const used = Object.values(fields).filter((v) => v.fill > 0).length
-      say(`${n}: ${records} records sampled, ${used} of ${names2.length} fields hold data`)
+      else for (const chunk of chunksOf(names2, 150)) profile(query(ws, m, `SELECT Id, ${chunk.join(', ')} FROM ${n} ORDER BY Id LIMIT ${sample}`, 'rest'), S, chunk, p)
+      out.objects[n] = p
+      const used = Object.values(p.fields).filter((v) => v.fill > 0).length
+      say(`${n}: ${p.records} records ${x ? 'in the export' : 'sampled'}, ${used} of ${names2.length} fields hold data`)
     }
     writeJson(ws.path('schema', 'fill.json'), out)
     say('schema/fill.json written; draft marks empty fields as dropped without a question')
@@ -982,20 +1228,23 @@ function main (argv) {
   if (cmd === 'draft') {
     const src = schema(ws, 'source'); const tgt = schema(ws, 'target'); const fill = fillRates(ws)
     if (!tgt.picklistItems) throw new Stop("schema/target.json predates the length, range and picklist rules draft reads; run the instance-migration skill's `migrate.mjs describe <workspace> --side target` again")
-    const names = opts.objects ? String(opts.objects).split(',').map((s) => s.trim()).filter(Boolean) : Object.keys(src.objects)
+    const names = opts.objects ? list(opts.objects) : Object.keys(src.objects)
     const have = new Set(m.objects.map((o) => o.source))
     const migrating = new Set([...have, ...names])
-    const added = names.filter((n) => !have.has(n))
+    // An entry still without a target (the object was created since) is drafted again, and so is
+    // every named one with --redraft; a settled entry is otherwise left as the user settled it.
+    const added = names.filter((n) => !have.has(n) || opts.redraft || !m.objects.find((o) => o.source === n).target)
     for (const n of added) {
       const { entry, rows } = draftObject(ws, n, src, tgt, migrating, fill)
       entry.report = rows
-      m.objects.push(entry)
+      const at = m.objects.findIndex((o) => o.source === n)
+      if (at >= 0) m.objects[at] = entry; else m.objects.push(entry)
     }
     writeJson(ws.path('mapping.json'), m)
     for (const line of report(ws, m, src, tgt, fill)) say(line)
     if (!fill) say('no fill rates: `sfmigrate probe` first, and the dropped fields that hold data stand out from the empty ones')
     for (const o of m.objects.filter((x) => added.includes(x.source) && x.target && !x.key)) {
-      say(`${o.source}: no key; ask which field identifies the same record on both sides`)
+      say(`${o.source}: no key, so records already on the target are not matched (a re-run is safe through the id map); name one only if the target may hold some already`)
     }
     say('reports/gaps.md and mapping/fields.csv written')
     say(`${todos(m).length} todo(s) left in mapping.json`)
@@ -1022,6 +1271,7 @@ function main (argv) {
   if (opts.limit && !Number.isInteger(limit)) throw new Stop('--limit takes a whole number')
 
   const src = schema(ws, 'source')
+  const x = exportOf(m)
   for (const o of m.objects) {
     const known = new Set(Object.keys(src.objects[o.source]?.fields ?? {}))
     const live = (o.fields ?? []).filter((e) => !e.drop && !e.todo)
@@ -1031,7 +1281,7 @@ function main (argv) {
     if (unknown.length) throw new Stop(`${o.source}: an "expr" reads r.${unknown[0]}, which is not a field on ${o.source}; check the name or describe again`)
     const fields = [...new Set([...live.filter((e) => e.from).map((e) => e.from), ...fromExpr])]
     if (!fields.length) { say(`${o.source}: nothing to extract (every field is dropped or unsettled)`); continue }
-    const rows = query(ws, m, soql(o.source, fields, o.where, limit), mode)
+    const rows = x ? exportRows(x, o, fields, src, limit) : query(ws, m, soql(o.source, fields, o.where, limit), mode)
     writeLines(ws.path('extract', `${o.source}.jsonl`), rows)
     say(`${o.source}: ${rows.length} records, ${fields.length} fields`)
   }
@@ -1045,8 +1295,17 @@ function main (argv) {
     }
   }
   for (const [key, e] of refs) {
-    const rows = query(ws, m, soql(e.sfMatch.object, [e.sfMatch.field], e.sfMatch.where, null), mode)
-    const map = Object.fromEntries(rows.map((r) => [r.id_p, r[e.sfMatch.field] ?? null]))
+    let map
+    if (x?.objects[e.sfMatch.object]) {
+      const keep = exportFilter(e.sfMatch.where, src.objects[e.sfMatch.object], src, e.sfMatch.object)
+      map = {}
+      for (const r of csvRecords(exportCsv(x, e.sfMatch.object))) if (keep(r)) map[r.Id] = r[e.sfMatch.field] || null
+    } else if (x && !m.source.org) {
+      throw new Stop(`${key}: the mapping matches ${e.sfMatch.object} by ${e.sfMatch.field}, and the export has no ${e.sfMatch.object}.csv: add one (Id and ${e.sfMatch.field} for every ${e.sfMatch.object} the rows reference), or init with --org as well to read it live`)
+    } else {
+      const rows = query(ws, m, soql(e.sfMatch.object, [e.sfMatch.field], e.sfMatch.where, null), mode)
+      map = Object.fromEntries(rows.map((r) => [r.id_p, r[e.sfMatch.field] ?? null]))
+    }
     writeJson(ws.path('extract', 'match', `${key}.json`), map)
     say(`${key}: ${Object.keys(map).length} ${e.sfMatch.object} records to match by ${e.sfMatch.field}`)
   }
