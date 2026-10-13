@@ -37,9 +37,21 @@ import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const isWindows = process.platform === 'win32'
-const INSTALL = isWindows
-  ? 'irm https://static-assets.veevaxdev.com/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\aspenup-installer.ps1" -NoModifyPath -Yes'
-  : "curl --proto '=https' --tlsv1.2 -LsSf https://static-assets.veevaxdev.com/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path"
+
+// Each environment serves its installer and toolchains from `static-assets.<app domain>`, the app
+// domain being the instance host's last two labels (x-platform's InstanceSettings.<env>.toml:
+// `cdn_url` beside `app_domain`). A launcher fetches only from the CDN it was installed from, so
+// the installer has to come from the instance's own environment.
+export function cdnUrl (instance) {
+  try {
+    const labels = new URL(instance).hostname.split('.')
+    return labels.length >= 2 ? `https://static-assets.${labels.slice(-2).join('.')}` : null
+  } catch { return null }
+}
+
+const installCommand = (cdn) => isWindows
+  ? `irm ${cdn}/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\aspenup-installer.ps1" -NoModifyPath -Yes`
+  : `curl --proto '=https' --tlsv1.2 -LsSf ${cdn}/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path`
 
 const nonBlank = (v) => (v && v.trim() ? v : null)
 const isFile = (p) => { try { return statSync(p).isFile() } catch { return false } }
@@ -151,10 +163,13 @@ export function servedRelease (instance, env = process.env, home = homedir()) {
 export function context ({ cwd = process.cwd(), env = process.env, home = homedir(), pinned = pin() } = {}) {
   const cli = findCli(env, home)
   if (!cli) {
+    const cdn = cdnUrl(instanceDir(cwd)?.instance)
     return [
       'The Aspen CLI is not installed on this machine, so no Aspen work can happen yet.',
       'At the first opportunity, tell the user and offer to set it up: invoke the `getting-started` skill.',
-      `The installer (${isWindows ? 'PowerShell' : 'macOS/Linux'}): \`${INSTALL}\``
+      cdn
+        ? `The installer for this directory's instance (${isWindows ? 'PowerShell' : 'macOS/Linux'}): \`${installCommand(cdn)}\``
+        : `The installer comes from the instance's environment, \`https://static-assets.<app domain>\` (the instance host's last two labels), so ask for the instance URL first (${isWindows ? 'PowerShell' : 'macOS/Linux'}): \`${installCommand('https://static-assets.<app domain>')}\``
     ].join('\n')
   }
 
