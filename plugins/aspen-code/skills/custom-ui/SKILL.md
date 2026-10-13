@@ -14,10 +14,23 @@ surface (a route, a layout section, a `custom_page` tab).
 Read `typescript/node_modules/@aspen-crm/sdk/dist/manifest.json`. With no
 `tokenStyleSheetFilePath` in it, the installed SDK is the 0.1.0 that `aspen init` pins, built for
 the previous release (`using-aspen` known issues), and the platform will refuse to render the page
-("SDK is no longer supported").
-Tell the human before building anything; never change the pins (`aspen doctor` expects the
-version this CLI scaffolds) or point them at an x-platform checkout. Token names, the typed token
-modules and the build's token check below all need SDK and x-cli 0.2.0.
+("SDK is no longer supported"). The 26.4.1 SDK and x-cli, 0.2.0, are on the instance environment's
+static-assets CDN. Tell the human, and with their go-ahead pin them:
+
+1. `<cdn>` is the `cdn:` line of `aspenup show` (or derived as `getting-started` step 1 says).
+   `curl -s <cdn>/sdk/platform/26.4.1/latest` names the current build as `pversion_bugfix`, e.g.
+   `26.4.1.20`.
+2. In `typescript/package.json`, set the two pins to the tarballs of that build:
+   ```json
+   "dependencies":    { "@aspen-crm/sdk":   "<cdn>/npm/platform/sdk/26.4.1/<pversion_bugfix>/aspen-crm-sdk-0.2.0.tgz" },
+   "devDependencies": { "@aspen-crm/x-cli": "<cdn>/npm/platform/x-cli/26.4.1/<pversion_bugfix>/aspen-crm-x-cli-0.2.0.tgz" }
+   ```
+3. `cd typescript && npm install` (it rewrites `package-lock.json`; suggest committing both), then
+   check that the manifest now has `tokenStyleSheetFilePath`.
+
+`aspen doctor` then reports `typescript.sdk-pins` as a `problem`; that is expected (`using-aspen`
+known issues). Never point the pins at an x-platform checkout. Token names, the typed token modules
+and the build's token check below all need SDK and x-cli 0.2.0.
 
 ## 1. Where it goes
 
@@ -69,9 +82,9 @@ modules and the build's token check below all need SDK and x-cli 0.2.0.
 section**: the required control choices, the token rules, typography and the rendered-UI checks.
 [ui-component-tokens.md](ui-component-tokens.md) picks a control's `--ap-comp-*` family.
 
-A select, lookup or date field is built from [controls.md](controls.md) — the platform's anatomy,
-the token for every part, the keyboard — with the icons in [aspen-icons.ts](aspen-icons.ts) copied
-into `typescript/src/`. Never a native `<select>`, `<datalist>` or date/time `<input>`, and never a
+A select, lookup or date field follows [controls.md](controls.md) — what the tokens don't give:
+which state shows which signal, how popovers position and close, and the keyboard — with the icons
+in [aspen-icons.ts](aspen-icons.ts) copied into `typescript/src/`. Never a native `<select>`, `<datalist>` or date/time `<input>`, and never a
 text glyph or emoji for an icon.
 
 A hook checks every write in `typescript/` against these rules. Its denial names the rule and the

@@ -21,8 +21,9 @@ The session-start note says what is missing. Without hooks, check:
 
 Then run `aspen doctor` once in the instance directory (JSON under an agent, one `id` + `status`
 per finding, exit 1 only on a `problem`) and fix each `problem` with the `fix` it gives — except
-`instance.logged-in` and `instance.credential-accepted`, whose fixes name `--api-key`: sign in as
-`getting-started` step 2 says instead. A failing `instance.cli-matches-instance` means nothing will
+`instance.logged-in` and `instance.credential-accepted`, whose fixes name `--api-key` (sign in as
+`getting-started` step 2 says instead), and `typescript.sdk-pins` once the SDK is pinned to the
+CDN (known issues below). A failing `instance.cli-matches-instance` means nothing will
 compile or deploy correctly until it is resolved (`diagnose`).
 
 ## The loop
@@ -87,17 +88,19 @@ the `aspen-crm` crate 0.1.0, and `@aspen-crm/sdk` / `@aspen-crm/x-cli` 0.2.0. *O
 instance* marks a fact not checkable in source. When the instance serves another release (the
 session-start note says so), `--help`, `aspen doctor` and the installed SDK win over any skill.
 
-**The 26.4.1 SDKs are not published.** `aspen init` 26.4.1 pins `aspen-crm`, `@aspen-crm/sdk` and
-`@aspen-crm/x-cli` to `0.1.0`, the only versions on crates.io and npm, built for the previous
-release:
+**`aspen init` 26.4.1 pins the SDKs to `0.1.0`**, built for the previous release:
+`aspen-crm`, `@aspen-crm/sdk` and `@aspen-crm/x-cli`, from crates.io and npm.
 
-- A 26.4.1 instance refuses to render a page built against `@aspen-crm/sdk` 0.1.0 ("… SDK is no
-  longer supported").
-- crates.io `aspen-crm` 0.1.0 lacks a record-value case the 26.4.1 host has, under the same label.
-  A component that queries has been refused at check-in for it (*observed on a live instance*).
-
-Tell the human before building a page or a querying trigger. Don't change the pins or point them
-at an x-platform checkout.
+- **npm:** a 26.4.1 instance refuses to render a page built against `@aspen-crm/sdk` 0.1.0 ("… SDK
+  is no longer supported"). The 26.4.1 packages, `@aspen-crm/sdk` and `@aspen-crm/x-cli` 0.2.0, are
+  published on the instance environment's static-assets CDN, not on npm. `custom-ui` "Before the
+  first file" points the pins at them, with the human's go-ahead. After that, `aspen doctor`
+  reports `typescript.sdk-pins` as a `problem` (it reads any URL as a range); that finding is
+  expected — don't apply its fix, which restores 0.1.0.
+- **Rust:** `aspen-crm` is published only to crates.io, at 0.1.0. That build lacks a record-value
+  case the 26.4.1 host has, under the same label, and a component that queries has been refused at
+  check-in for it (*observed on a live instance*). Tell the human before building a querying
+  trigger; don't patch the crate or point it at an x-platform checkout.
 
 **Where the docs are wrong for CLI 26.4.1:**
 

@@ -6,8 +6,8 @@ component whose tokens to use. It does not list token names.
 ## Where the names are
 
 On SDK 0.2.0, the installed SDK has one typed module per component, generated from its token
-snapshot. SDK 0.1.0 has no snapshot and no modules: take names from `controls.md`, or read them
-off a native element in the running instance.
+snapshot. SDK 0.1.0 has no snapshot and no modules: pin the CDN's 0.2.0 (`SKILL.md`, "Before the
+first file"), or read names off a native element in the running instance.
 
 ```sh
 ls  typescript/node_modules/@aspen-crm/sdk/dist/tokens/comp/            # one file per family

@@ -540,7 +540,7 @@ export function decide (filePath, content, known, whole = true) {
         `  renders a \`${component}\` but references no ${prefixes.map((p) => `\`${p}*\``).join(' or ')} token` +
         (snapshot
           ? ` — see ${prefixes.map((p) => `\`dist/tokens/comp/${p.slice('--ap-comp-'.length, -1)}.d.ts\``).join(' and ')} in the installed SDK`
-          : ' — the installed SDK ships no token snapshot, so take the names from the custom-ui skill\'s `controls.md` or a native element')
+          : ' — the installed SDK ships no token snapshot: pin the 0.2.0 SDK the instance\'s CDN serves for its typed names (custom-ui `SKILL.md`, "Before the first file"), or read them off a native element')
       ).join('\n') +
       '\n\nStart from the component\'s tokens for the parts it publishes, and compose from ' +
       '`--ap-sem-*` only for what it does not (a magnitude bar in a cell, say). If this is ' +
@@ -555,7 +555,7 @@ export function decide (filePath, content, known, whole = true) {
       'it, so the opened control is the operating system\'s, not Aspen\'s, however the closed ' +
       'one is styled:\n' +
       native.map(({ line, control, instead }) => `  line ${line}: ${control} → build ${instead}`).join('\n') +
-      '\n\nBuild it from the custom-ui skill\'s `controls.md` (anatomy, tokens per part, keyboard), ' +
+      '\n\nBuild it from the custom-ui skill\'s `controls.md` (states, popovers, keyboard), ' +
       'with its icons from `aspen-icons.ts` — never a text glyph or emoji. If a native control is ' +
       'deliberate (a hidden form field, say), put `aspen-component-exempt: <reason>` in a comment ' +
       'anywhere in the file.'
@@ -583,11 +583,11 @@ export function decide (filePath, content, known, whole = true) {
         'inline styles, import them from `@aspen-crm/sdk/tokens/sem` or `/comp` instead of ' +
         'writing the string. '
       : 'The installed `@aspen-crm/sdk` ships no token snapshot (0.1.0, what `aspen init` pins, ' +
-        'has none), so there are no typed token modules and nothing checks a name. Copy names ' +
-        'from the custom-ui skill\'s `controls.md`, or read them off a native element in the ' +
-        'running instance, and keep the light value as the `var()` fallback. The platform does ' +
-        'not render a page on such an SDK: tell the human before building one (custom-ui ' +
-        '`SKILL.md`, "Before the first file"); never change the pins. ') +
+        'has none), so there are no typed token modules and nothing checks a name. Read names ' +
+        'off a native element in the running instance, and keep the light value as the `var()` ' +
+        'fallback. The platform does ' +
+        'not render a page on such an SDK: tell the human, and with their go-ahead pin the 0.2.0 ' +
+        'SDK and x-cli the instance\'s CDN serves (custom-ui `SKILL.md`, "Before the first file"). ') +
     'If a value genuinely has no token, keep it and put ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above.'
   )

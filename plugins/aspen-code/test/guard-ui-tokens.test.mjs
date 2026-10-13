@@ -250,11 +250,12 @@ test('the message points at the typed token modules for JS and inline styles', (
   assert.match(reason, /@aspen-crm\/sdk\/tokens\/sem/)
 })
 
-test('with no token snapshot the message points at controls.md and a kept fallback instead', () => {
+test('with no token snapshot the message points at pinning the CDN SDK and a kept fallback instead', () => {
   const reason = decide(UI, css('.x { color: #11171d; }'), null)
   assert.match(reason, /color: #11171d/)
   assert.match(reason, /ships no token snapshot/)
-  assert.match(reason, /controls\.md/)
+  assert.match(reason, /Before the first file/)
+  assert.match(reason, /native element/)
   assert.match(reason, /fallback/)
   assert.match(reason, /tell the human/)
   assert.doesNotMatch(reason, /@aspen-crm\/sdk\/tokens\//)
@@ -359,10 +360,10 @@ test('the message names the component and where to find its tokens', () => {
   assert.match(reason, /aspen-component-exempt/)
 })
 
-test('with no token snapshot a rebuilt component is pointed at controls.md, not a .d.ts', () => {
+test('with no token snapshot a rebuilt component is pointed at pinning the CDN SDK, not a .d.ts', () => {
   const reason = decide(UI, REBUILT_TABLE, null)
   assert.match(reason, /renders a `table`/)
-  assert.match(reason, /controls\.md/)
+  assert.match(reason, /Before the first file/)
   assert.doesNotMatch(reason, /\.d\.ts/)
 })
 

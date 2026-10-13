@@ -134,7 +134,8 @@ aspen doctor --dir <dir>   # one {id, section, status, message, fix?} per findin
 ```
 
 After step 4 every `toolchain.*`, `rust.*` and `typescript.*` check is `ok` except
-`rust.component-built` and `typescript.bundle-built`, which warn until the first build. A failing
+`rust.component-built` and `typescript.bundle-built`, which warn until the first build, and
+`typescript.sdk-pins` once the SDK is pinned to the CDN (`using-aspen` known issues). A failing
 dependency check: re-run the script, which does only what is missing. Stop and tell the user on:
 
 - `instance.cli-matches-instance` — CLI and instance on different releases (`diagnose`).
