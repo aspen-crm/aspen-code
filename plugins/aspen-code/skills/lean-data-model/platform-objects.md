@@ -81,7 +81,8 @@ any overlay; `activity_p` takes fields but no custom object types.
 
 A platform object that takes `_c` fields is almost always the right place for one, and needs no
 new component. A field you add to `account_p`, `case_p`, `opportunity_p`, `product_p` or `team_p`
-must also be listed on each of its object types. What a platform component cannot be is
+must also be listed on each of its object types, and a platform object type may refuse it on
+this instance. What a platform component cannot be is
 **overridden**: its own entries stay locked. `metadata` has the details and the workarounds.
 
 Two traps worth knowing before you extend one:

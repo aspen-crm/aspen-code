@@ -1,9 +1,10 @@
 # Platform overlays: what refuses, what is locked
 
 Read before planning an overlay of a platform (`_p`) component, and when a record write fails
-"Field '<x>_p' is not allowed for object type". Checked against 26.4.1. The compiler is the
-authority: `extensibility` and `locks` in `metadata/platform/` don't list every lock, so test a
-plan with a minimal overlay and `aspen compile --metadata` before building on it.
+"Field '<x>_p' is not allowed for object type". Checked against 26.4.1. The compiler enforces
+`extensibility` and `locks` from this directory's `metadata/platform/`, which differ between
+instances, so read the file there, then test a plan with a minimal overlay and
+`aspen compile --metadata` before building on it.
 
 ## What refuses an overlay
 
@@ -15,13 +16,17 @@ plan with a minimal overlay and `aspen compile --metadata` before building on it
 - A platform field cannot be retired: its `active` is locked.
 - A `_c` layout for a platform object is refused ("reserved for the platform"): extend the platform
   layout instead. A layout for your own object type on a platform object is fine.
-- `case_p.case_p` locks `fields` though its JSON shows no lock: a label-only overlay compiles, and
-  any `fields` change fails "attribute 'case_p.case_p.fields' is locked and cannot be extended".
-  A new case field needs a custom object type on `case_p` that lists it, and records of that type.
-- Other platform object types, most platform picklists and `aspen_crm_p` take new `_c` entries. Their
-  platform entries are locked, except a picklist item's `label`, `description` and usually
-  `active`, plus `parent-objects` on most object-dependent picklists: widen those rather than
-  forcing data to fit.
+- A platform object type takes new `fields` entries only when its file in
+  `metadata/platform/object_p/object_type_p/` has `{"locator": "fields", "state": "unlocked"}`.
+  Without it, `fields` is locked even when the file has no `locks` at all: a label-only overlay
+  compiles, and a `fields` overlay fails "attribute '<type>.fields' is locked and cannot be
+  extended". This depends on the instance, not the object: on one 26.4.1 instance only
+  `account_p.account_p` unlocked `fields`, on another every platform type but `user_p`'s. Where
+  it is locked, a new field needs a custom object type on that object that lists it, and records
+  of that type.
+- Most platform picklists and `aspen_crm_p` take new `_c` entries. Their platform entries are
+  locked, except a picklist item's `label`, `description` and usually `active`, plus
+  `parent-objects` on most object-dependent picklists: widen those rather than forcing data to fit.
 
 ## `_p` fields an object type doesn't get
 
