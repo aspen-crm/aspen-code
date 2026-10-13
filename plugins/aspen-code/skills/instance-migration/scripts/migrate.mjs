@@ -242,7 +242,10 @@ async function describeInstance ({ read }) {
     picklists[name] = items.map((i) => i.name)
     picklistItems[name] = items.map((i) => ({ name: i.name, label: i.label ?? null, parentObjects: i['parent-objects'] ?? null }))
   }
-  return { objects, picklists, picklistItems }
+  // A currency value needs the record's currency_p, so which codes have one decides what loads.
+  const code = objects.currency_p && Object.keys(objects.currency_p.fields).find((n) => objects.currency_p.fields[n].unique && objects.currency_p.fields[n].picklist)
+  const currencies = code ? [...new Set((await read('/data/query', { query: `SELECT ${code} FROM currency_p LIMIT 1000` })).data?.map((r) => r[code]).filter(Boolean) ?? [])] : null
+  return { objects, picklists, picklistItems, currencies }
 }
 
 // ---- draft: match by name and type; every gap becomes a todo for the user to settle
@@ -322,6 +325,8 @@ function checkMapping (m, T) {
       for (const x of lookupObjects(e)) if (!names.has(x)) throw new Stop(`${at}: lookup ${x} is not an object in this mapping; migrate it or use {"object", "match"}`)
       if (isMatch(e) && !(e.lookup.object && e.lookup.match)) throw new Stop(`${at}: a match lookup needs "object" and "match"`)
       if (isMatch(e) && e.lookup.by != null && e.lookup.by !== 'value') throw new Stop(`${at}: a match lookup's "by" is "value" or absent`)
+      if (e.normalize && !NORMALIZE.includes(e.normalize)) throw new Stop(`${at}: normalize is one of ${NORMALIZE.join(', ')}`)
+      for (const x of [].concat(e.distinctFrom ?? [])) if (!o.fields.some((y) => y.target === x && !y.drop)) throw new Stop(`${at}: distinctFrom ${x} is not a field this object writes`)
     }
   }
 }
@@ -403,6 +408,60 @@ function pointer (e, v, objs, resolve, targetOf) {
 
 const raw = (e, row) => 'value' in e ? e.value : e.expr ? evaluate(e.expr, row) : row[e.from] ?? null
 
+// Rules the CRM triggers enforce on write that the describe does not declare (x-platform
+// teams/crm at the pinned release). The dry run checks them; sfmigrate draft proposes the fix.
+export const TARGET_RULES = {
+  contact_p: {
+    // common/src/validation.rs phone_numbers_distinct and work_personal_email_distinct: each pair
+    // must differ when both are set. The trigger scopes the error to the second field.
+    distinct: [['mobile_phone_p', 'office_phone_p'], ['mobile_phone_p', 'home_phone_p'], ['office_phone_p', 'home_phone_p'], ['work_email_p', 'personal_email_p']],
+    // common/src/channel.rs normalize_linkedin_url: anything it cannot correct is refused.
+    normalize: { linkedin_profile_p: 'linkedin' },
+    // triggers/src/contact/derive.rs apply_default_owner_to_insert: a new contact's owner is the caller.
+    setOnInsert: { owner_p: 'Aspen makes the person loading a contact its owner, whatever the row says; reassigning it is a separate update' }
+  }
+}
+
+// `"normalize"` on a field entry: the value converted to what the target accepts, or blank when it
+// cannot be done without guessing. Each returns null for a value it cannot convert.
+const LINKEDIN = 'https://www.linkedin.com/in/'
+const NORMALIZERS = {
+  // E.164. Unambiguous cases only: an explicit + or 00 country code, a 10-digit North American
+  // number, or a leading 1 written apart from it (1-415-...). Anything else is a national format
+  // whose country the value does not say.
+  phone (s) {
+    const t = s.trim().replace(/\s*(?:ext\.?|x|#)\s*\d+$/i, '')
+    const digits = t.replace(/\D/g, '')
+    const intl = /^\+/.test(t) ? digits : /^00/.test(t) ? digits.slice(2) : null
+    if (intl != null) return intl.length >= 8 && intl.length <= 15 ? `+${intl}` : null
+    const nanp = (d) => /^[2-9]\d{2}[2-9]\d{6}$/.test(d)
+    if (digits.length === 10 && nanp(digits)) return `+1${digits}`
+    if (digits.length === 11 && digits[0] === '1' && nanp(digits.slice(1)) && /^\(?1[\s.)-]/.test(t)) return `+${digits}`
+    return null
+  },
+  // http or https; a value with no scheme gets https://. Too long for the field: the query and
+  // fragment go first, then the value.
+  url (s, f) {
+    let t = s.trim().replace(/^\/\//, '')
+    if (!t) return null
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(t)) t = `https://${t}`
+    try { if (!['http:', 'https:'].includes(new URL(t).protocol)) return null } catch { return null }
+    if (f.maxLength != null && [...t].length > f.maxLength) t = t.replace(/[?#].*$/, '')
+    return f.maxLength != null && [...t].length > f.maxLength ? null : t
+  },
+  // The platform's own normalize_linkedin_url, so what loads is what the instance keeps.
+  linkedin (s) {
+    let t = s.trim().replace(/[?#].*$/, '')
+    for (const p of ['http://linkedin.com/in/', 'https://linkedin.com/in/', 'http://www.linkedin.com/in/', 'www.linkedin.com/in/', 'linkedin.com/in/']) {
+      if (t.startsWith(p)) { t = LINKEDIN + t.slice(p.length); break }
+    }
+    if (!t.startsWith(LINKEDIN)) return null
+    const slash = t.indexOf('/', LINKEDIN.length)
+    return slash === -1 ? t : t.slice(0, slash)
+  }
+}
+export const NORMALIZE = Object.keys(NORMALIZERS)
+
 function format (v, f) {
   if (v === null || v === undefined) return { value: null }
   if (typeof v === 'boolean') return { value: String(v) }
@@ -443,6 +502,7 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
   const picklists = lists.picklists ?? {}
   const values = {}
   const errors = []
+  const changed = [] // values normalize, truncate or distinctFrom changed or blanked, for the report
   const points = {}
   let wait = false
   const err = (field, kind, detail) => errors.push({ field, kind, detail })
@@ -467,18 +527,36 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
         const objs = lookupObjects(e)
         const id = resolve(objs, v)
         if (id) { points[e.target] = pointer(e, v, objs, resolve, targetOf); v = id } else if (objs.some((x) => extracted[x]?.has(v))) { wait = true; continue }
-        else if (e.missing === 'null') v = null
+        else if (e.missing === 'null') { v = null; changed.push({ field: e.target, kind: `blank: the ${objs.join('/')} is not in the extract` }) }
         else { err(e.target, 'lookup not in the extract', `${objs.join('/')} ${v}`); continue }
       }
     }
     const out = format(v, f)
     if (out.error) { err(e.target, out.error, String(v)); continue }
+    if (out.value != null && e.normalize) {
+      const n = NORMALIZERS[e.normalize](out.value, f)
+      if (n !== out.value) changed.push({ field: e.target, kind: n == null ? `blank: not convertible by normalize ${e.normalize}` : `normalized (${e.normalize})` })
+      out.value = n
+    }
+    if (out.value != null && e.truncate && f.maxLength != null && [...out.value].length > f.maxLength) {
+      out.value = [...out.value].slice(0, f.maxLength).join('')
+      changed.push({ field: e.target, kind: `truncated to ${f.maxLength}` })
+    }
     if (out.value === null && f.required) { err(e.target, 'required', 'blank'); continue }
     // A reference picklist (object type, security profile, field) names no list; the instance checks it.
     if (f.type === 'picklist' && f.picklist && out.value != null && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
     const bad = out.value == null ? null : rejects(out.value, f)
     if (bad) { err(e.target, ...bad); continue }
     values[e.target] = out.value
+  }
+  // "distinctFrom": blank this field when it holds the same value as the named one(s).
+  for (const e of o.fields) {
+    if (e.drop || !e.distinctFrom || values[e.target] == null) continue
+    const other = [].concat(e.distinctFrom).find((x) => values[x] === values[e.target])
+    if (other) { values[e.target] = null; changed.push({ field: e.target, kind: `blank: same as ${other}` }) }
+  }
+  for (const [a, b] of TARGET_RULES[o.target]?.distinct ?? []) {
+    if (values[a] != null && values[a] === values[b]) err(b, `must differ from ${a}`, 'the CRM trigger refuses the same value in both')
   }
   for (const e of o.fields) {
     // A row waiting on its polyid's record is written later; its companion is not blank yet.
@@ -500,7 +578,7 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
   // currency value sent without one. The describe names no link between them: this is the platform's rule.
   const money = Object.keys(values).filter((n) => values[n] != null && TO.fields[n]?.type === 'currency')
   if (!wait && TO.fields.ccode_p && money.length && values.ccode_p == null && !errors.some((x) => x.field === 'ccode_p')) err('ccode_p', 'required with a currency value', `${money.join(', ')} set, ccode_p blank`)
-  return { values, errors, wait }
+  return { values, errors, wait, changed }
 }
 
 // ---- load
@@ -535,6 +613,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   const targetOf = Object.fromEntries(m.objects.map((o) => [o.source, o.target]))
   const files = (o) => ({ extract: ws.path('extract', `${o.source}.jsonl`), idmap: ws.path('idmap', `${o.source}.jsonl`), patched: ws.path('idmap', `${o.source}.patched.jsonl`), errors: ws.path('errors', `${o.source}.jsonl`) })
   const rows = {}; const extracted = {}; const idmaps = {}; const matched = {}; const planned = {}; const errors = {}; const stats = {}
+  const changes = new Map() // "<object>\0<field>\0<what>" → rows: what normalize, truncate and distinctFrom did
   for (const { entry: o } of order) {
     if (!existsSync(files(o).extract)) throw new Stop(`no extract for ${o.source}; run extract first`)
     rows[o.source] = readLines(files(o).extract)
@@ -579,6 +658,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     const inserts = []; const updates = []; const keys = new Set()
     for (const row of rows[o.source]) {
       const c = convert(row, o, TO, T, ctx)
+      if (!c.errors.length && !c.wait) for (const x of c.changed) changes.set(`${o.source}\u0000${x.field}\u0000${x.kind}`, (changes.get(`${o.source}\u0000${x.field}\u0000${x.kind}`) ?? 0) + 1)
       const known = idmaps[o.source].get(row.id_p)
       if (known) {
         st.loaded++
@@ -635,6 +715,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
         const id = resolveId(lookupObjects(e), v)
         if (id) { values[e.target] = id; points[e.target] = pointer(e, v, lookupObjects(e), resolveId, targetOf) } else if (lookupObjects(e).some((x) => extracted[x]?.has(v))) open = true
         else if (e.missing !== 'null') fail(o, row.id_p, { field: e.target, kind: 'lookup not in the extract', detail: `${lookupObjects(e).join('/')} ${v}` })
+        else { const k = `${o.source}\u0000${e.target}\u0000blank: the ${lookupObjects(e).join('/')} is not in the extract`; changes.set(k, (changes.get(k) ?? 0) + 1) }
       }
       for (const e of o.fields.filter((x) => !x.drop && x.objectOf && step.deferred.has(x.target))) {
         if (points[e.objectOf]) values[e.target] = points[e.objectOf]
@@ -656,7 +737,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     stats[o.source].failed = byRow.size
     writeLines(files(o).errors, [...byRow].map(([id, errs]) => ({ id, errors: errs })))
   }
-  const report = loadReport(m, order, stats, errors, { run, limit })
+  const report = loadReport(m, order, stats, errors, { run, limit, changes })
   writeText(ws.path('reports', run ? 'load.md' : 'plan.md'), report)
   const total = (k) => Object.values(stats).reduce((n, s) => n + s[k], 0)
   const incomplete = limit == null && (total('waiting') > 0 || total('pending') > 0)
@@ -664,7 +745,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   return total('failed') > 0 || incomplete ? 1 : 0
 }
 
-function loadReport (m, order, stats, errors, { run, limit }) {
+function loadReport (m, order, stats, errors, { run, limit, changes = new Map() }) {
   const lines = [
     run ? '# Load' : '# Migration plan (dry run)', '',
     `Source: ${m.source.url}  `, `Target: ${m.target.url}  `, `Run: ${new Date().toISOString()}${limit != null ? ` (pilot: at most ${limit} new records per object)` : ''}`, '',
@@ -689,6 +770,10 @@ function loadReport (m, order, stats, errors, { run, limit }) {
         groups.set(k, (groups.get(k) ?? 0) + 1)
       }
     }
+  }
+  if (changes.size) {
+    lines.push('', '## Changed on the way in', '', 'Values `normalize`, `truncate` and `distinctFrom` changed or left blank, in rows that load.', '', '| Object | Field | Change | Records |', '|---|---|---|---|')
+    for (const [k, n] of changes) { const [o, f, kind] = k.split('\u0000'); lines.push(`| ${o} | ${f} | ${kind} | ${n} |`) }
   }
   if (groups.size) {
     lines.push('', '## Errors', '', '| Object | Field | Problem | Records |', '|---|---|---|---|')

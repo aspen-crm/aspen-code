@@ -50,13 +50,16 @@ left.
 | `"from": "f", "lookup": { "object": "user_p", "match": "email_p" }` | For an object that is not migrated: find the source record's `email_p`, then the target record with the same `email_p`. Records this run inserts into `user_p` are matched too: the entry that loads them goes first. |
 | `"from": "f", "lookup": { "object": "currency_p", "match": "currency_code_p", "by": "value" }` | The value itself (after `map`) is what to match: the target record whose `currency_code_p` equals it. For a source that holds a code, not a record id. No match file is extracted. |
 | `"objectOf": "what_p"` | For a polyid's companion (`whaton_p`, `customeron_p`, `owneron_p`): the target object the named polyid's id resolved through, or blank when it is blank. Use it rather than a constant whenever the polyid's lookup lists more than one object; it keeps the pair from disagreeing. |
-| `"expr": "…"` | A JavaScript expression over the source row `r`, e.g. `` `${r.first_c} ${r.last_c}`.trim() ``. It returns a string, a number, a boolean or `null`. Use it only for a rule the user stated, and keep their words in `note`. |
+| `"expr": "…"` | A JavaScript expression over the source row `r`, e.g. `` `${r.first_c} ${r.last_c}`.trim() ``. It returns a string, a number, a boolean or `null`. It is one expression, evaluated as `return (<expr>)`: for statements, wrap them in an arrow function called at once, `(() => { … })()`. Use it only for a rule the user stated, and keep their words in `note`. |
 | `"from": "f", "drop": true` | Nothing. It records that the field was left out on purpose. |
 
 Other keys on a field entry:
 
 | Key | Meaning |
 |---|---|
+| `normalize` | `"phone"`, `"url"` or `"linkedin"`: the value converted to what the target accepts, or blank when that would mean guessing. `phone`: E.164 from an explicit `+` or `00` country code or a 10-digit North American number; an extension is dropped. `url`: http or https, `https://` added when there is no scheme, the query and fragment cut when too long. `linkedin`: Aspen's own form, `https://www.linkedin.com/in/<profile>`. The plan and load reports count what changed under **Changed on the way in**. |
+| `truncate: true` | Text longer than the target field's `maxLength` is cut to it, and counted in the report. |
+| `distinctFrom` | A target field (or a list of them): this field is left blank when it holds the same value. For a pair the CRM refuses to be equal, such as a contact's mobile and office phones. |
 | `missing: "null"` | On a `lookup`: write blank instead of reporting an error when the referenced record is not in the extract (for example, filtered out by `where`), or when a match lookup finds no target record (a user with no account on the target). |
 | `note` | Free text. Put the user's decision here. |
 | `todo` | Written by `draft`. Settle it, then delete the key. |
@@ -77,7 +80,10 @@ Other keys on a field entry:
 - The dry run fails a row the target would refuse for what `schema/target.json` declares: a text
   longer than `maxLength`, a number outside `minValue`..`maxValue`, a phone that is not E.164
   (`+` and up to 15 digits), a URL that is not http or https, and an object-dependent picklist
-  value (`dependsOn`) its parent object does not allow (`picklistItems[].parentObjects`). Triggers
-  and validation rules it cannot see: the pilot finds those.
+  value (`dependsOn`) its parent object does not allow (`picklistItems[].parentObjects`). It also
+  checks the CRM rules the describe doesn't declare, in `migrate.mjs`'s `TARGET_RULES`: a
+  contact's mobile, office and home phones differ, and so do its work and personal emails.
+  Other triggers and validation rules it cannot see: the pilot finds those.
+- `schema/target.json`'s `currencies` lists the codes the instance has a `currency_p` record for.
 - A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.

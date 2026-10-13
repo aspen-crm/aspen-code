@@ -45,8 +45,9 @@ delta: what `source` means, the two Salesforce-only keys, and what `draft` puts 
 | `source.kind` | Always `"salesforce"`. |
 | `source.org` | The `sf` CLI alias or username. Every Salesforce command passes it as `--target-org`; no credential is ever stored here. |
 | `source.instanceUrl`, `username`, `apiVersion` | Written by `init` from `sf org display`, so the report can say which org this was. |
+| `source.export` | Written by `init --from-export`: the export's directory, its `started`/`finished` stamps and its objects. Every command refuses an export whose stamps changed since. |
 | `objects[].source` | The Salesforce API name, case-sensitive: `Account`, `Opportunity`, `Custom_Thing__c`. |
-| `objects[].where` | A **SOQL** condition, not AQL. It is appended to the extract query. |
+| `objects[].where` | A **SOQL** condition, not AQL. It is appended to the extract query. With an export, the same condition filters the CSV rows: clauses joined by `AND`, each `Field = value`, `!=`, `IN (…)`, `NOT IN (…)` or `Rel.Type = 'Contact'` (the object the row's lookup points at, by its id's key prefix). Anything else is refused. |
 | `objects[].report` | Written by `draft`: one row per field behind `reports/gaps.md` and `mapping/fields.csv`. `sfmigrate gaps` re-renders from it. Not read by `load`. |
 | `fields[].from` | The Salesforce field API name, or a parent's field through its relationship (`Event.Subject` on an `EventRelation`), which `extract` selects and flattens to that name. |
 
@@ -76,11 +77,19 @@ referenced record — unless the Salesforce value is itself the thing to match (
   "lookup": { "object": "currency_p", "match": "currency_code_p", "by": "value" } }
 ```
 
+## `schema/fill.json`
+
+Written by `probe`, read by `draft`: `objects.<Object>.fields.<Field>` is `{ "fill": 0..1,
+"maxLen": <longest value>, "values": { "<picklist value>": <rows> } }`, with `values` on picklist
+fields only. `source` is `"export"` (every record in the export) or `"org"` (a sample of `sample`
+records).
+
 ## Picklists
 
 Salesforce picklist values are labels like `Biotechnology`; Aspen's are names like `biotech_p`.
 `draft` seeds `map` with each value that matches a target item's name or label, ignoring case, and
-lists the rest in the `todo`. An object-dependent picklist (`dependsOn` in `schema/target.json`,
+lists the rest in the `todo`, with how many rows hold each. With fill rates, only the values the
+data holds are asked about. An object-dependent picklist (`dependsOn` in `schema/target.json`,
 such as `team_role_p`) is seeded only with the items its parent object allows, so
 `AccountTeamMember` and `OpportunityTeamMember` get different maps. `default` applies to anything
 not in the table; without it, an unmapped value fails the row.
