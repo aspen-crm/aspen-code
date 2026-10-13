@@ -82,7 +82,7 @@ controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
 same checks over a tree for CI.
 
-Not in 0.0.7: the remaining guard hooks.
+Not in 0.0.8: the remaining guard hooks.
 
 ## Install
 
