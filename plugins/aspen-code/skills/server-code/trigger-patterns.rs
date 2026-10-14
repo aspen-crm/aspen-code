@@ -20,7 +20,10 @@
 //!     { "name": "opp_won_brief_c",       "object": "opportunity_p",     "events": ["before_update", "after_update"] },
 //!     { "name": "opp_motion_sync_c",     "object": "opportunity_p",     "events": ["after_insert", "after_update"] },
 //!     { "name": "org_health_c",          "object": "org_c",             "events": ["before_insert", "before_update"] },
-//!     { "name": "champion_exit_c",       "object": "contact_role_p",    "events": ["before_delete"] }
+//!     { "name": "champion_exit_c",       "object": "contact_role_p",    "events": ["before_delete"] },
+//!     { "name": "opp_close_rules_c",     "object": "opportunity_p",     "events": ["before_insert", "before_update"] },
+//!     { "name": "case_escalation_c",     "object": "case_p",
+//!       "events": ["before_insert", "before_update", "after_insert", "after_update"] }
 //!   ]
 //! }
 //! ```
@@ -37,9 +40,9 @@ use std::collections::{HashMap, HashSet};
 use aspen_crm::error;
 use aspen_crm::record::trigger::{
     AfterInsertContext, AfterUpdateContext, BeforeDeleteContext, BeforeInsertContext,
-    BeforeUpdateContext, ImmutableObjectRecord, MutableObjectRecord,
+    BeforeUpdateContext, ImmutableBatch, ImmutableObjectRecord, MutableBatch, MutableObjectRecord,
 };
-use aspen_crm::record::{FieldState, RecordFieldValue, ValidFieldValue};
+use aspen_crm::record::{FieldError, FieldState, RecordError, RecordFieldValue, ValidFieldValue};
 use aspen_crm::services::query::SelectQueryRow;
 use aspen_crm::services::record::{BatchProcessed, InsertRequest, RecordInput, UpdateRequest};
 use aspen_crm::services::PlatformServices;
@@ -95,6 +98,14 @@ fn decimal_of(state: FieldState) -> Option<Decimal> {
     }
 }
 
+/// A `currency`/`currency` batch field (the entered amount, e.g. `amount_p`).
+fn currency_of(state: FieldState) -> Option<Decimal> {
+    match state {
+        FieldState::Value(RecordFieldValue::Currency(d)) => Some(d),
+        _ => None,
+    }
+}
+
 /// An id-shaped cell out of a query row. Query cells are `Option<ValidFieldValue>`, a
 /// different shape from batch fields; a polyid read back is `PolyidParent`/`PolyidLookup`.
 fn cell_id(row: &SelectQueryRow, index: usize) -> Option<Uuid> {
@@ -131,6 +142,13 @@ fn cell_decimal(row: &SelectQueryRow, index: usize) -> Option<Decimal> {
         Some(Some(ValidFieldValue::RecordFieldValue(
             RecordFieldValue::Number(d) | RecordFieldValue::NumberPercentage(d),
         ))) => Some(*d),
+        _ => None,
+    }
+}
+
+fn cell_currency(row: &SelectQueryRow, index: usize) -> Option<Decimal> {
+    match row.get(index) {
+        Some(Some(ValidFieldValue::RecordFieldValue(RecordFieldValue::Currency(d)))) => Some(*d),
         _ => None,
     }
 }
@@ -274,7 +292,8 @@ impl target_team_default_c for Entrypoints {
 // record.set; after_update only writes OTHER records (the task). The batch holds the fields
 // the caller sent, possibly unchanged, so the before half reads the stored row to see whether
 // this save is the transition, and the after half skips opportunities that already have the
-// task (the write-only-on-change guard for a write to other records).
+// task (the write-only-on-change guard for a write to other records). Pattern 8 is the general
+// shape of this split: insert too, and a stamp the after half reads back from its own batch.
 
 impl opp_won_brief_c for Entrypoints {
     fn before_update(context: &BeforeUpdateContext) -> error::Result<()> {
@@ -617,4 +636,243 @@ impl champion_exit_c for Entrypoints {
         }
         Ok(())
     }
+}
+
+// ── 7. before_insert + before_update: reject the bad rows, commit the rest ────
+// Two rules on closing an opportunity. One rejects with a field error, the other with a record
+// error, and each rejects only its own row: returning Ok commits every row with no error, where
+// an Err would roll back the whole batch, good rows included. error-handling.md has what each
+// produces in the form and in the API response; the developer picks (SKILL.md step 1).
+//
+// before_insert and before_update both hand over a `&MutableBatch`, so one function serves both.
+// The batch and record types (`MutableBatch`, `MutableObjectRecord`, `ImmutableBatch`,
+// `ImmutableObjectRecord`) are structs, not traits: take them by reference, never as `R: …`.
+// An update that sends only status_p or only amount_p is judged against the stored row.
+
+/// The stored status and amount of an opportunity being updated.
+#[derive(Default)]
+struct StoredClose {
+    status: Option<String>,
+    amount: Option<Decimal>,
+}
+
+impl opp_close_rules_c for Entrypoints {
+    fn before_insert(context: &BeforeInsertContext) -> error::Result<()> {
+        check_close_rules(context.batch(), &HashMap::new())
+    }
+
+    fn before_update(context: &BeforeUpdateContext) -> error::Result<()> {
+        let mut ids: Vec<Uuid> = Vec::new();
+        for record in context.batch().iter() {
+            if sends_close_input(&record)?
+                && let Some(id) = id_of(record.get("id_p")?)
+            {
+                ids.push(id);
+            }
+        }
+
+        let mut stored: HashMap<Uuid, StoredClose> = HashMap::new();
+        for chunk in ids.chunks(100) {
+            let q = context.services().query()
+                .query(format!("SELECT id_p, status_p, amount_p FROM opportunity_p WHERE id_p IN ({}) LIMIT 100", id_list(chunk)))
+                .build()?;
+            let rows = context.services().query().execute(q)?;
+            for row in rows.iter_rows() {
+                if let Some(id) = cell_id(row, 0) {
+                    let close = StoredClose { status: cell_picklist(row, 1), amount: cell_currency(row, 2) };
+                    stored.insert(id, close);
+                }
+            }
+        }
+        check_close_rules(context.batch(), &stored)
+    }
+}
+
+fn sends_close_input(record: &MutableObjectRecord) -> error::Result<bool> {
+    Ok(!matches!(record.get("status_p")?, FieldState::Absent)
+        || !matches!(record.get("amount_p")?, FieldState::Absent))
+}
+
+fn check_close_rules(
+    batch: &MutableBatch<'_>,
+    stored: &HashMap<Uuid, StoredClose>,
+) -> error::Result<()> {
+    let nothing_stored = StoredClose::default();
+    for record in batch.iter() {
+        if !sends_close_input(&record)? {
+            continue;
+        }
+        // A before_insert record has no id_p yet, so it has nothing stored.
+        let before = id_of(record.get("id_p")?)
+            .and_then(|id| stored.get(&id))
+            .unwrap_or(&nothing_stored);
+        let status = match record.get("status_p")? {
+            FieldState::Absent => before.status.clone(),
+            sent => picklist_of(sent),
+        };
+        let amount = match record.get("amount_p")? {
+            FieldState::Absent => before.amount,
+            sent => currency_of(sent),
+        };
+
+        let was_closed = before.status.as_deref().is_some_and(|s| s != "open_p");
+        if was_closed && status.as_deref() == Some("open_p") {
+            // No one field is at fault: a record error, in the form's banner.
+            record.add_record_error(RecordError::new(
+                "reopen_closed",
+                "Closed opportunities can't be reopened. Create a new opportunity instead.",
+            ));
+            continue;
+        }
+        if status.as_deref() == Some("closed_won_p") && amount.is_none() {
+            // The field the user has to fix: a field error, under amount_p.
+            record.add_field_error(FieldError::new(
+                "amount_p",
+                "amount_required",
+                "Enter the amount before closing this opportunity as won.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ── 8. All four events: validate and stamp before the write, act after it ────
+// When a save makes a case critical: reject it if the case has no account; otherwise stamp
+// escalated_at_c (a custom datetime on case_p) and, once the save commits, give the case owner
+// a task. The shape fits any "validate, then create something" rule.
+//
+// Why both halves. Only a before-trigger can reject a row or set a field on it. The task waits
+// for the after-trigger: its batch holds only the rows that passed every check before the write
+// (yours and the platform's), and on insert it is the first place the case has an id_p for the
+// task to point at.
+//
+// The stamp is the handshake. The after batch is the batch as the before-trigger left it, so a
+// field set there with record.set reads back with record.get. A stamp in the after batch means
+// "this save escalated the case" because the before half drops one the caller sent
+// (`FieldState::Absent` takes the field out of the batch; an update then leaves the stored value
+// alone) and stamps only a case whose stored stamp is empty, which also makes it one task per
+// case.
+
+const ESCALATED_AT: &str = "escalated_at_c";
+
+/// What is stored on a case being updated.
+#[derive(Default)]
+struct StoredCase {
+    account: Option<Uuid>,
+    escalated: bool,
+}
+
+impl case_escalation_c for Entrypoints {
+    fn before_insert(context: &BeforeInsertContext) -> error::Result<()> {
+        escalate_before(context.batch(), &HashMap::new())
+    }
+
+    fn before_update(context: &BeforeUpdateContext) -> error::Result<()> {
+        let mut ids: Vec<Uuid> = Vec::new();
+        for record in context.batch().iter() {
+            if !matches!(record.get("priority_p")?, FieldState::Absent)
+                && let Some(id) = id_of(record.get("id_p")?)
+            {
+                ids.push(id);
+            }
+        }
+
+        let mut stored: HashMap<Uuid, StoredCase> = HashMap::new();
+        for chunk in ids.chunks(100) {
+            let q = context.services().query()
+                .query(format!("SELECT id_p, account_p, {ESCALATED_AT} FROM case_p WHERE id_p IN ({}) LIMIT 100", id_list(chunk)))
+                .build()?;
+            let rows = context.services().query().execute(q)?;
+            for row in rows.iter_rows() {
+                if let Some(id) = cell_id(row, 0) {
+                    let escalated = matches!(row.get(2), Some(Some(_)));
+                    stored.insert(id, StoredCase { account: cell_id(row, 1), escalated });
+                }
+            }
+        }
+        escalate_before(context.batch(), &stored)
+    }
+
+    fn after_insert(context: &AfterInsertContext) -> error::Result<()> {
+        escalate_after(context.batch(), context.services())
+    }
+
+    fn after_update(context: &AfterUpdateContext) -> error::Result<()> {
+        escalate_after(context.batch(), context.services())
+    }
+}
+
+fn escalate_before(
+    batch: &MutableBatch<'_>,
+    stored: &HashMap<Uuid, StoredCase>,
+) -> error::Result<()> {
+    let nothing_stored = StoredCase::default();
+    for record in batch.iter() {
+        // Only this half sets the stamp.
+        if !matches!(record.get(ESCALATED_AT)?, FieldState::Absent) {
+            record.set(ESCALATED_AT, FieldState::Absent);
+        }
+        if picklist_of(record.get("priority_p")?).as_deref() != Some("critical_p") {
+            continue;
+        }
+        let before = id_of(record.get("id_p")?)
+            .and_then(|id| stored.get(&id))
+            .unwrap_or(&nothing_stored);
+        if before.escalated {
+            continue;
+        }
+        let account = match record.get("account_p")? {
+            FieldState::Absent => before.account,
+            sent => id_of(sent),
+        };
+        if account.is_none() {
+            record.add_field_error(FieldError::new(
+                "account_p",
+                "escalation_needs_account",
+                "A critical case needs an account so it can be escalated.",
+            ));
+            continue;
+        }
+        record.set(ESCALATED_AT, FieldState::Value(RecordFieldValue::Datetime(Timestamp::now())));
+    }
+    Ok(())
+}
+
+fn escalate_after(batch: &ImmutableBatch<'_>, services: &PlatformServices<'_>) -> error::Result<()> {
+    let mut escalated: Vec<Uuid> = Vec::new();
+    for record in batch.iter() {
+        if matches!(record.get(ESCALATED_AT)?, FieldState::Value(_))
+            && let Some(id) = id_of(record.get("id_p")?)
+        {
+            escalated.push(id);
+        }
+    }
+
+    let mut tasks: Vec<RecordInput> = Vec::new();
+    for chunk in escalated.chunks(100) {
+        // The batch holds what the caller sent plus the stamp; read the rest.
+        let q = services.query()
+            .query(format!("SELECT id_p, subject_p, owner_p FROM case_p WHERE id_p IN ({}) LIMIT 100", id_list(chunk)))
+            .build()?;
+        let rows = services.query().execute(q)?;
+        for row in rows.iter_rows() {
+            let Some(case_id) = cell_id(row, 0) else { continue };
+            let subject = cell_text(row, 1).unwrap_or_else(|| "case".into());
+            tasks.push(task(
+                format!("Escalated: {subject}"),
+                cell_id(row, 2),
+                case_id,
+                "case_p",
+                1,
+                "This case was raised to critical. Contact the account today.".into(),
+            )?);
+        }
+    }
+
+    if !tasks.is_empty() {
+        let req = InsertRequest::builder("task_p").records(tasks).build()?;
+        let result = services.record().execute_insert(req)?;
+        check_failures(&result, "case_escalation_c/task")?;
+    }
+    Ok(())
 }
