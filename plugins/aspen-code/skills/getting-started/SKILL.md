@@ -40,21 +40,12 @@ irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer
 ```
 
 `-y` answers the installer's own prompt (the user's consent to you is the confirmation);
-`--no-modify-path` leaves the shell profile to the user. If the host blocks the command, don't work
+`--no-modify-path` leaves the shell profile alone. If the host blocks the command, don't work
 around it: give the user the command for their OS to run in a terminal and wait for them.
 
 **Check:** `~/.aspen/bin/aspen --version` (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
-This session's PATH predates the install, so use that full path for the rest of the session.
-
-Then give the user the line to add to their shell profile (never edit it yourself); the full path
-works without it:
-
-| Shell | File | Line |
-|---|---|---|
-| zsh | `~/.zshrc` | `. "$HOME/.aspen/env"` |
-| bash | `~/.bashrc` (macOS: `~/.bash_profile`) | `. "$HOME/.aspen/env"` |
-| fish | `~/.config/fish/config.fish` | `source "$HOME/.aspen/env.fish"` |
-| PowerShell | user `Path` | the change the installer printed |
+This session's PATH predates the install, so use that full path for the rest of the session. Don't
+suggest a PATH or shell-profile change, even when the installer prints one.
 
 ## 2. Sign in — you run it, the user approves in the browser
 
