@@ -104,7 +104,7 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 |---|---|---|
 | A platform field (`_p`) on one side only, such as `smb_p`, `smt_p`, `extid_p` | Drop | The instances run different platform versions; a `_p` field can't be created. |
 | A custom field (`_c`) the target lacks | Drop, unless the user names a use | A new field can't be deleted yet: `lean-data-model` first. |
-| A lookup to users | Match by email, blank when there is no match: `"lookup": {"object": "user_p", "match": "email_p"}, "missing": "null"` | Migrating `user_p` creates users on the target. |
+| A lookup to users or team members | Match by email on the object the field looks up — `team_p` for an account's or contact's `owner_p`, `user_p` for a deal's, case's, lead's or activity's — blank when there is no match: `"lookup": {"object": "team_p", "match": "email_p"}, "missing": "null"`. An email two target records share matches neither (`user_p.email_p` is not unique) | Migrating `user_p` creates users on the target. |
 | A lookup to another object not migrated | Drop, unless the user wants that object too | Migrating it brings its own decisions. |
 | A picklist value not on the target | The closest target value, in `map` | The user confirms each one. |
 | A reference picklist (`object_type_ref`, `security_profile_ref` in `schema/target.json`), such as `otype_p` | Drop; map a value only when the user names the target value | Neither the schema nor the dry run lists these values, and the instance refuses one it doesn't have. |

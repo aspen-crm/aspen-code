@@ -75,7 +75,8 @@ const WHATS = (...objects) => objects.map((object) => ({ object, field: 'what_p'
 
 const TARGET = {
   objects: {
-    user_p: object('User', { email_p: text('Email', { unique: true }) }),
+    // As a 26.4.1 describe has them: user_p.email_p is not unique (username_p is); team_p.email_p is.
+    user_p: object('User', { email_p: field('Email', 'text', 'email', { required: true }), username_p: text('Username', { required: true, unique: true }) }),
     team_p: object('Team', { email_p: text('Email', { unique: true }), user_p: id('User', 'user_p', { unique: true }) }, { description: 'An employee, contractor, or partner of the company.' }),
     account_p: object('Account', { name_p: text('Name', { required: true }), owner_p: id('Owner', 'team_p'), website_p: field('Website', 'text', 'url', { maxLength: 120 }), industry_p: field('Industry', 'picklist', 'picklist', { picklist: 'industry_p' }), parent_account_p: id('Parent Account', 'account_p') },
       { included: WHATS('task_p', 'meeting_p', 'contact_role_p', 'team_role_p') }),
@@ -247,6 +248,14 @@ test("an opportunity's account is its customer, and its owner a user, each with 
   assert.deepEqual(to(opp, 'customeron_p'), { target: 'customeron_p', objectOf: 'customer_p' })
   assert.deepEqual(to(opp, 'owner_p'), { target: 'owner_p', from: 'OwnerId', lookup: USER_MATCH, sfMatch: BY_EMAIL, missing: 'null' })
   assert.deepEqual(to(opp, 'owneron_p'), { target: 'owneron_p', objectOf: 'owner_p' })
+})
+
+test('an owner is matched by email on the object its field looks up: team_p for an account, user_p (not unique) for a deal', t => {
+  const { entry, gaps } = draft(t, CORE)
+  assert.deepEqual(to(entry('Account'), 'owner_p').lookup, TEAM_MATCH)
+  assert.deepEqual(to(entry('Opportunity'), 'owner_p').lookup, USER_MATCH)
+  assert.match(gaps, /user_p\.email_p is not unique, so an email two of them share is left blank too/)
+  assert.doesNotMatch(gaps, /team_p\.email_p is not unique/)
 })
 
 test("a task's own row names its owner, and points at what it is about; leads it cannot hold carry blank", t => {
