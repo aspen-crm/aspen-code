@@ -139,7 +139,7 @@ const TARGET = {
 }
 TARGET.picklists = Object.fromEntries(Object.entries(TARGET.picklistItems).map(([n, items]) => [n, items.map((i) => i.name)]))
 
-function draft (t, objects, source = SOURCE) {
+function draft (t, objects, source = SOURCE, { target = TARGET, files = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'sfmigrate '))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   mkdirSync(join(root, '.aspen'))
@@ -148,7 +148,8 @@ function draft (t, objects, source = SOURCE) {
   mkdirSync(join(ws, 'schema'), { recursive: true })
   writeFileSync(join(ws, 'mapping.json'), JSON.stringify({ source: { kind: 'salesforce', org: 'acme' }, target: { url: URL }, objects: [] }))
   writeFileSync(join(ws, 'schema', 'source.json'), JSON.stringify(source))
-  writeFileSync(join(ws, 'schema', 'target.json'), JSON.stringify(TARGET))
+  writeFileSync(join(ws, 'schema', 'target.json'), JSON.stringify(target))
+  for (const [file, text] of Object.entries(files)) { mkdirSync(dirname(join(root, file)), { recursive: true }); writeFileSync(join(root, file), text) }
   const r = spawnSync(process.execPath, [script, 'draft', ws, '--objects', objects], { cwd: root, encoding: 'utf8' })
   assert.equal(r.status, 0, r.stderr)
   const m = JSON.parse(readFileSync(join(ws, 'mapping.json'), 'utf8'))
@@ -350,11 +351,11 @@ const EXPORT = {
   'Id,TaskId,RelationId,IsWhat,CreatedDate\n0RTA,00TA,003A,false,2023-01-01T00:00:00.000Z\n0RTB,00TA,00QX,false,2023-01-01T00:00:00.000Z\n0RTC,00TB,001A,true,2023-01-02T00:00:00.000Z\n']
 }
 
-function fromExport (t) {
+function fromExport (t, url = URL) {
   const root = mkdtempSync(join(tmpdir(), 'sfmigrate export '))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   mkdirSync(join(root, '.aspen'))
-  writeFileSync(join(root, '.aspen', 'config.toml'), `instance = "${URL}"\n`)
+  writeFileSync(join(root, '.aspen', 'config.toml'), `instance = "${url}"\n`)
   const dir = join(root, 'export')
   mkdirSync(join(dir, 'describe'), { recursive: true })
   for (const [name, [describe, csv]] of Object.entries(EXPORT)) {
@@ -451,4 +452,81 @@ test('draft drafts again an object that had no target, once the target has one',
   const m = JSON.parse(readFileSync(join(ws, 'mapping.json'), 'utf8'))
   assert.equal(m.objects.length, 1)
   assert.equal(m.objects[0].target, 'product_p')
+})
+
+// ---- line items, per-parent picklists, triggers, preflight
+
+const QUOTING = structuredClone(SOURCE)
+Object.assign(QUOTING.objects, {
+  OpportunityLineItem: sfObject('Opportunity Product', {
+    OpportunityId: ref('Opportunity ID', 'Opportunity'), Product2Id: ref('Product ID', 'Product2'), PricebookEntryId: ref('Price Book Entry ID', 'PricebookEntry'),
+    UnitPrice: sfField('Sales Price', 'currency', { aspen: 'currency' }), TotalPrice: sfField('Total Price', 'currency', { aspen: 'currency' })
+  }),
+  Pricebook2: sfObject('Price Book', { Name: str('Price Book Name') }),
+  PricebookEntry: sfObject('Price Book Entry', { Pricebook2Id: ref('Price Book ID', 'Pricebook2'), Product2Id: ref('Product ID', 'Product2') }),
+  // A team member on an account or a deal, in one object: one role list, two parents.
+  Deal_Team__c: sfObject('Deal Team', { WhatId: ref('Related To ID', 'Account', 'Opportunity'), Role__c: pick('Role', 'Deal_Team__c.Role__c') })
+})
+QUOTING.picklists['Deal_Team__c.Role__c'] = ['Account Manager', 'Sales Rep']
+const QUOTED = structuredClone(TARGET)
+Object.assign(QUOTED.objects, {
+  opportunity_line_p: object('Opportunity Line', {
+    opportunity_p: id('Opportunity', 'opportunity_p', { required: true }), product_p: id('Product', 'product_p'), pbe_p: id('Price Book Entry', 'pricebook_entry_p'),
+    price_p: field('Price', 'currency', 'currency'), line_total_p: field('Line Total', 'currency', 'currency'), ccode_p: id('Currency', 'currency_p')
+  }),
+  pricebook_p: object('Price Book', { name_p: text('Name') }),
+  pricebook_entry_p: object('Price Book Entry', { pricebook_p: id('Price Book', 'pricebook_p'), product_p: id('Product', 'product_p') })
+})
+QUOTED.objects.team_role_p.label = 'Deal Team' // reached by its label, as a custom object would be
+QUOTED.picklistsByParent = { 'team_role_p.role_p': { picklist: 'team_role_p', dependsOn: 'whaton_p', values: { account_p: ['account_manager_p'], opportunity_p: ['sales_rep_p'] } } }
+
+test('line items and price books reach their Aspen objects, and a lookup named <Object>Id its <object>_p', t => {
+  const { entry } = draft(t, `${CORE},OpportunityLineItem,Product2,Pricebook2,PricebookEntry`, QUOTING, { target: QUOTED })
+  const line = entry('OpportunityLineItem')
+  assert.equal(line.target, 'opportunity_line_p')
+  assert.equal(entry('Pricebook2').target, 'pricebook_p')
+  assert.deepEqual(to(line, 'opportunity_p'), { target: 'opportunity_p', from: 'OpportunityId', lookup: 'Opportunity' })
+  assert.equal(to(line, 'product_p').lookup, 'Product2')
+  assert.equal(to(line, 'pbe_p').lookup, 'PricebookEntry')
+  assert.equal(to(line, 'price_p').from, 'UnitPrice')
+  assert.equal(to(line, 'line_total_p').from, 'TotalPrice')
+  assert.equal(to(entry('PricebookEntry'), 'pricebook_p').lookup, 'Pricebook2')
+})
+
+test('an object-dependent picklist on a row that can point at two objects gets one map, and one todo, per object', t => {
+  const { entry, gaps } = draft(t, `${CORE},Deal_Team__c`, QUOTING, { target: QUOTED })
+  const role = to(entry('Deal_Team__c'), 'role_p')
+  assert.equal(role.map, undefined)
+  assert.deepEqual(role.byParent.account_p.map, { 'Account Manager': 'account_manager_p' })
+  assert.match(role.byParent.account_p.todo, /team_role_p allows on account_p: Sales Rep\./)
+  assert.deepEqual(role.byParent.opportunity_p.map, { 'Sales Rep': 'sales_rep_p' })
+  assert.match(role.byParent.opportunity_p.todo, /allows on opportunity_p: Account Manager\./)
+  assert.match(gaps, /`Role__c`[^\n]*allows on account_p/)
+  assert.match(gaps, /`Role__c`[^\n]*allows on opportunity_p/)
+})
+
+test("draft leaves out a field this instance's trigger writes, naming the trigger", t => {
+  const files = {
+    'rust/aspen.server.json': JSON.stringify({ 'record-triggers': [{ name: 'won_c', object: 'opportunity_p', events: ['before_update'] }] }),
+    'rust/src/lib.rs': 'impl won_c for Entrypoints {\n  fn before_update(context: &BeforeUpdateContext) -> error::Result<()> { won::before_half(context.batch()) }\n}\n',
+    'rust/src/won.rs': 'pub fn before_half(batch: &MutableBatch) -> error::Result<()> { for r in batch.iter() { r.set("probability_p", FieldState::Absent); } Ok(()) }\n'
+  }
+  const { entry, gaps } = draft(t, CORE, SOURCE, { files })
+  const prob = from(entry('Opportunity'), 'Probability')
+  assert.equal(prob.drop, true)
+  assert.match(prob.note, /the won_c trigger writes probability_p/)
+  assert.match(gaps, /written by a trigger/)
+})
+
+test('preflight takes each object\'s fullest source row as its test values, then hands the write to migrate.mjs', t => {
+  const x = fromExport(t, 'http://127.0.0.1:9/acme/dev/')
+  assert.equal(x.run('init', x.ws, '--from-export', x.dir).status, 0)
+  mkdirSync(join(x.ws, 'schema'), { recursive: true })
+  writeFileSync(join(x.ws, 'schema', 'target.json'), JSON.stringify(TARGET))
+  assert.equal(x.run('plan', x.ws, '--objects', 'Account,Contact', '--keep-target').status, 0)
+  const r = x.run('preflight', x.ws)
+  assert.equal(r.status, 2, 'nothing answers at the target, so the sign-in fails after the sample is written')
+  const sample = JSON.parse(readFileSync(join(x.ws, 'schema', 'sample.json'), 'utf8'))
+  assert.equal(sample.Account.id_p, '001B', 'the account with the most mapped fields filled')
+  assert.equal(sample.Contact.LastName, 'Lee')
 })
