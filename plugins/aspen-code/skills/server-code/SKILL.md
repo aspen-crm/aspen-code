@@ -8,6 +8,8 @@ description: Use to add or change server-side logic on an Aspen instance — a R
 Server code is Rust compiled to a `wasm32-wasip2` component, in the instance directory's one crate
 at `rust/`. It runs however a record is written — form, data API, bulk load, runtime MCP — which is
 why a rule belongs here and not in a page. `model-first` decides whether it belongs here at all.
+Not routed here from `using-aspen`? Read its "Where the docs are wrong" table first: the docs'
+`aspen move --rust --dev` doesn't work with the `rust/` crate `aspen init` creates.
 
 ## 0. Orient
 
@@ -21,8 +23,10 @@ why a rule belongs here and not in a page. `model-first` decides whether it belo
 - **Read the object you trigger on** for exact field names and each field's `type`/`subtype`
   (`metadata/compiled/object_p/<object>.json` after `aspen compile --metadata`, or `active/` /
   `platform/`). The `RecordFieldValue` variant follows the field's metadata.
-- **Start from [trigger-patterns.rs](trigger-patterns.rs):** six handlers and their shared helpers,
-  checked against the SDK source and the platform objects. It builds against the scaffolded crate
+- **Start from [trigger-patterns.rs](trigger-patterns.rs):** eight handlers and their shared
+  helpers, checked against the SDK source and the platform objects. Validation that rejects rows
+  and commits the rest is pattern 7; validate, then create another record once the save commits
+  (all four insert/update events) is pattern 8. It builds against the scaffolded crate
   with `jiff = "0.2"` added and its registration in `aspen.server.json`. Copy the helpers and the
   closest handler.
 - **[rust-trigger-notes.md](rust-trigger-notes.md)** has what the docs leave out: the toolchain pin
@@ -75,6 +79,10 @@ interfaces; the *Web API* docs page).
 - **Never write to the records the trigger is running on**; the platform refuses the nested write
   and the whole save fails. Derive a value on the record itself in `before_insert`/`before_update`
   with `record.set`.
+- **Reject and set in a before-trigger; create follow-on records in an after-trigger.** The after
+  batch holds only the rows that passed (a rejected row is not in it), and a `before_insert`
+  record has no `id_p` yet for a new record to point at. A field the before half sets reads back
+  in the after batch: that stamp is the handshake (pattern 8).
 - **Batch the work:** collect across the batch, then at most one insert and one update per object.
 - **A trigger that writes other records of its own object needs a write-only-on-change guard**, or
   it re-fires on them.
@@ -92,7 +100,8 @@ A componentization error naming wit-bindgen is the toolchain pin, not a dependen
 
 ## 4. Deploy and prove it
 
-Deploy with `build-and-deploy`. Done means a record written through a real path shows the
-behavior: the derived field set, or the save rejected where the error table says, with its message
-and the API response the developer expects. Then summarize what the rule does, the message it
-rejects with, and the edge cases it skips (e.g. an empty optional field).
+Deploy with `build-and-deploy` (the check-in chain, never `--dev`). Done means a record written
+through a real path shows the behavior: the derived field set, or the save rejected where the
+error table says, with its message and the API response the developer expects. Then summarize
+what the rule does, the message it rejects with, and the edge cases it skips (e.g. an empty
+optional field).

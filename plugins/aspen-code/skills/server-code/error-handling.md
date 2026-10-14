@@ -14,6 +14,8 @@ it does not cover what reaches the caller.
 | `record.add_record_error(RecordError::new(code, msg))` — `before_insert`, `before_update`, `before_delete` | Only that row is rejected; the other rows commit | The error banner above the form | Same as above, with no `context` |
 | `Err(..)`, `error::bail!`, or a panic — any trigger | The **whole batch rolls back**, including rows that were fine | An error modal, not the banner | HTTP 200, `{status: FAILURE, failures: [{error_type: INVALID_DATA, subtype: UNKNOWN_DATA, detail: "before trigger error '<msg>'"}]}` (`after trigger error '…'` from an after-trigger), no `data` |
 
+Patterns 7 and 8 in `trigger-patterns.rs` reject rows with both calls and commit the rest.
+
 ## What does not reach anyone
 
 - **The `code` you pass is dropped**, and so is `RecordError::set_subtype`. Every trigger error

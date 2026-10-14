@@ -9,6 +9,7 @@ You write JSON into `metadata/custom/`, one file per component; `aspen compile -
 validates it offline with the instance's own validator and writes the resolved result to
 `metadata/compiled/`. Creating something? `lean-data-model` and `model-first` come first. The
 instance directory's `AGENTS.md` owns paths and naming; the docs own each type's attributes.
+Not routed here from `using-aspen`? Read its "Where the docs are wrong" table first.
 
 ## The loop
 
@@ -92,8 +93,20 @@ Through `aspen-docs` (`searchDocumentation`, then `getPage`):
 - **List-view filters have no date offsets.** `TODAY()` and `NOW()` exist; "next quarter" is a
   static range someone must edit. Say so.
 - **`number` bounds are decimal strings** (`"min-value": "0"`; a bare integer fails "expected a
-  Decimal type"), and a `number` needs both ("missing field `max-value`"). On `currency` both are
-  optional.
+  Decimal type"), and a `number` needs both ("missing field `max-value`"). On `currency` the
+  bounds are optional, but the field is not alone:
+- **A `currency` field comes in a pair.** The entered `currency`/`currency` field names its
+  companion in `converted-amt`, a `currency`/`converted` field named with `cc` before the
+  namespace (`amount_c` → `amountcc_c`) whose `entered-amt` points back. Without it the compile
+  fails "missing field `converted-amt`" or "references nonexistent field". Copy the pair from
+  `metadata/platform/object_p/opportunity_p.json` (`amount_p`, `amountcc_p`); the converted field
+  is system-managed and read-only on layouts.
+- **A layout must render every mode.** Each of `create`, `edit` and `view` needs at least one
+  active section, or the compile fails "Every render mode must be covered by at least one active
+  section, but no section renders in: view". A detail section without `render-modes` covers all
+  three; a related list, activity, attachment or people-role section covers only `view`; an
+  address section `edit` and `view`; a `custom_code` section only the modes it lists. A detail
+  section limited to `["create", "edit"]` needs a `view` section beside it.
 - **A `checkbox` `default-value` is a JSON boolean** (`false`).
 - **`searchable: true` needs a search config**; default to `false`.
 - **A new field on an object with record types** must be listed in each of its `object_type_p`,
