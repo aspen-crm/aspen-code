@@ -38,9 +38,9 @@ The scaffold already did the two things that used to cost hours; keep them:
 2. **`rust/Cargo.lock` is committed, and `aspen compile --rust` builds `--locked`.** Adding a
    dependency (the patterns use `jiff = "0.2"`) means updating the lock once:
    `cd rust && cargo update -p <crate>` (or `cargo generate-lockfile`), then commit it.
-3. **`aspen-crm` is pinned exactly** (`"=0.1.0"`), the release this CLI ships. `aspen doctor`
-   (`rust.sdk-pin`) flags a range or a different release. On a new CLI, raise it and the two
-   TypeScript packages together — never just one.
+3. **`aspen-crm` is pinned exactly** (`"=<release>"`), the SDK release this CLI ships (`aspen init`
+   prints it). `aspen doctor` (`rust.sdk-pin`) flags a range or a different release. On a new CLI,
+   raise it and the two TypeScript packages together — never just one.
 
 Per machine: rustup, and `rustup target add wasm32-wasip2` (doctor: `toolchain.wasm-target`).
 

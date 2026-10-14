@@ -25,8 +25,7 @@ that looks fine and changed nothing.
 
 ## 2. Pre-flight
 
-- `aspen doctor` — no `problem` (other than `typescript.sdk-pins` with the SDK pinned to the CDN,
-  `custom-ui` "Before the first file"); in particular `instance.cli-matches-instance`,
+- `aspen doctor` — no `problem`; in particular `instance.cli-matches-instance`,
   `configuration.record-matches-login` and `instance.no-package-in-flight` are `ok`.
 - `aspen status` — no check-in in flight (possibly someone else's). If one is, wait and tell the
   human; don't clear it.
