@@ -22,8 +22,7 @@ The session-start note says what is missing. Without hooks, check:
 Then run `aspen doctor` once in the instance directory (JSON under an agent, one `id` + `status`
 per finding, exit 1 only on a `problem`) and fix each `problem` with the `fix` it gives — except
 `instance.logged-in` and `instance.credential-accepted`, whose fixes name `--api-key` (sign in as
-`getting-started` step 2 says instead), and `typescript.sdk-pins` once the SDK is pinned to the
-CDN (`custom-ui` "Before the first file"). A failing `instance.cli-matches-instance` means nothing will
+`getting-started` step 2 says instead). A failing `instance.cli-matches-instance` means nothing will
 compile or deploy correctly until it is resolved (`diagnose`).
 
 ## The loop

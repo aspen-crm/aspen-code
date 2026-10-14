@@ -11,8 +11,8 @@
 // Exits 1 when anything is flagged, 0 when the tree is clean.
 //
 // Token names are checked against the snapshot of the `@aspen-crm/sdk` installed nearest
-// each file, as x-cli 0.2.0's build (`aspen compile --typescript`) does; a file with no installed
-// SDK, or one without a snapshot (0.1.0 ships none), gets the hardcode and component checks only.
+// each file, as the build (`aspen compile --typescript`) does; a file with no installed SDK, or
+// one without a snapshot, gets the hardcode and component checks only.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, extname } from 'node:path'
@@ -69,7 +69,7 @@ if (asJson) {
 } else if (!results.length) {
   console.log(unchecked
     ? `ui-tokens: no findings, but token names were not checked in ${unchecked} of ${files} file(s) — ` +
-      'no installed @aspen-crm/sdk with a token snapshot (0.1.0 ships none), so an `--ap-*` name ' +
+      'no installed @aspen-crm/sdk with a token snapshot, so an `--ap-*` name ' +
       'that does not exist passes.'
     : 'ui-tokens: clean.')
 } else {
@@ -103,9 +103,8 @@ if (asJson) {
     `\n${counted} finding(s) in ${results.length} file(s). ` +
     (unchecked < files
       ? 'Token names come from the installed SDK (`typescript/node_modules/@aspen-crm/sdk/dist/tokens/`). '
-      : 'The installed SDK ships no token snapshot: pin the 0.2.0 SDK the instance\'s CDN serves ' +
-        '(custom-ui `SKILL.md`, "Before the first file"), or read names off a native element and ' +
-        'keep the light value as the `var()` fallback. ') +
+      : 'No installed SDK ships a token snapshot: run `npm install` in `typescript/`, or read names ' +
+        'off a native element and keep the light value as the `var()` fallback. ') +
     'For a value the system has no token for, add ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above, or ' +
     '`aspen-component-exempt: <reason>` anywhere in the file for a component or native-control finding.'

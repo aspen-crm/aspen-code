@@ -250,11 +250,11 @@ test('the message points at the typed token modules for JS and inline styles', (
   assert.match(reason, /@aspen-crm\/sdk\/tokens\/sem/)
 })
 
-test('with no token snapshot the message points at pinning the CDN SDK and a kept fallback instead', () => {
+test('with no token snapshot the message points at npm install and a kept fallback instead', () => {
   const reason = decide(UI, css('.x { color: #11171d; }'), null)
   assert.match(reason, /color: #11171d/)
   assert.match(reason, /ships no token snapshot/)
-  assert.match(reason, /Before the first file/)
+  assert.match(reason, /npm install/)
   assert.match(reason, /native element/)
   assert.match(reason, /fallback/)
   assert.match(reason, /tell the human/)
@@ -263,7 +263,7 @@ test('with no token snapshot the message points at pinning the CDN SDK and a kep
   assert.doesNotMatch(reason, /every Public `--ap-\*` token resolves/)
 })
 
-test('an SDK shaped like 0.1.0 (a manifest with no snapshot) gets the no-snapshot message', () => {
+test('an SDK with a manifest but no snapshot gets the no-snapshot message', () => {
   const project = makeProject({
     manifest: { distributionName: 'sdk', exports: { '@aspen-crm/sdk': 'index.js' }, source: 'platform' },
     snapshot: null
@@ -360,10 +360,10 @@ test('the message names the component and where to find its tokens', () => {
   assert.match(reason, /aspen-component-exempt/)
 })
 
-test('with no token snapshot a rebuilt component is pointed at pinning the CDN SDK, not a .d.ts', () => {
+test('with no token snapshot a rebuilt component is pointed at npm install, not a .d.ts', () => {
   const reason = decide(UI, REBUILT_TABLE, null)
   assert.match(reason, /renders a `table`/)
-  assert.match(reason, /Before the first file/)
+  assert.match(reason, /npm install/)
   assert.doesNotMatch(reason, /\.d\.ts/)
 })
 

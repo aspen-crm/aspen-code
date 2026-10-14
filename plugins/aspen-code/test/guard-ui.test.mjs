@@ -101,7 +101,7 @@ test('lint-ui-tokens flags a tree with a hardcode and passes a clean one', (t) =
   const dirty = spawnSync('node', [lint, join(dir, 'typescript', 'src')], { encoding: 'utf8' })
   assert.equal(dirty.status, 1)
   assert.match(dirty.stdout, /padding: 16px/)
-  assert.match(dirty.stdout, /ships no token snapshot/, 'no SDK installed, so it must not point at token modules')
+  assert.match(dirty.stdout, /ships a token snapshot: run `npm install`/, 'no SDK installed, so it must not point at token modules')
   assert.doesNotMatch(dirty.stdout, /dist\/tokens\//)
   put('typescript/src/picker.ts', "export const select = () => h('select', {})\n")
   const native = spawnSync('node', [lint, join(dir, 'typescript', 'src')], { encoding: 'utf8' })

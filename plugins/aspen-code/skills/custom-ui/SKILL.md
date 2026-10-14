@@ -9,30 +9,6 @@ A page or layout section is the last tier, built over fields the model already h
 `model-first` decides whether one should exist. A hook asks the first time a write declares a new
 surface (a route, a layout section, a `custom_page` tab).
 
-## Before the first file: check the SDK
-
-`aspen init` 26.4.1 pins npm's `@aspen-crm/sdk` and `@aspen-crm/x-cli` 0.1.0, and a 26.4.1
-instance refuses to render a page built on them ("SDK is no longer supported"). The platform loads
-the SDK from the CDN at runtime, but the release it loads is the one x-cli records from the
-installed package, and npm's 0.1.0 records the previous release, whose SDK has no token stylesheet.
-The 26.4.1 packages (0.2.0) are on the instance environment's static-assets CDN. If
-`typescript/node_modules/@aspen-crm/sdk/dist/manifest.json` has no `tokenStyleSheetFilePath`, pin
-them, then tell the human you did:
-
-1. `<cdn>` is the `cdn:` line of `aspenup show`. `curl -s <cdn>/sdk/platform/26.4.1/latest` names
-   the current build as `pversion_bugfix` (e.g. `26.4.1.20`); any 26.4.1 build records `26.4.1`.
-2. In `typescript/package.json`:
-   ```json
-   "dependencies":    { "@aspen-crm/sdk":   "<cdn>/npm/platform/sdk/26.4.1/<pversion_bugfix>/aspen-crm-sdk-0.2.0.tgz" },
-   "devDependencies": { "@aspen-crm/x-cli": "<cdn>/npm/platform/x-cli/26.4.1/<pversion_bugfix>/aspen-crm-x-cli-0.2.0.tgz" }
-   ```
-3. `cd typescript && npm install` (it rewrites `package-lock.json`; suggest committing both), and
-   check the manifest now has `tokenStyleSheetFilePath`.
-
-`aspen doctor` then reports `typescript.sdk-pins` as a `problem`, because it reads any URL as a
-range. That is expected; its fix would restore 0.1.0, so don't apply it. Token names, the typed
-token modules and the build's token check below all need the 0.2.0 pair.
-
 ## 1. Where it goes
 
 - An entry module under `typescript/src/` exports `definePage(({ element }) => …)` or
@@ -45,10 +21,8 @@ token modules and the build's token check below all need the 0.2.0 pair.
   rejects it — `module`, `export`). Keep the scaffolded `/` route: x-cli fails a configuration with
   no route.
 - Styles go in a stylesheet the entry imports (`import './plan.css'`); x-cli bundles it and the
-  platform links it inside the page's shadow root. x-cli's tsconfig sets
-  `noUncheckedSideEffectImports` and x-cli 0.1.0 ships no CSS declaration, so add
-  `typescript/src/css.d.ts` holding `declare module '*.css';`. The build bundles with esbuild and
-  does not type-check.
+  platform links it inside the page's shadow root. The build bundles with esbuild and does not
+  type-check.
 - A `custom_page` tab names its page `ui_main_c.<route name>` (`metadata`'s `metadata-shapes.md`).
   A custom (`_c`) codefile serves at `/ui/c/<base-url-path-part>/<route path>`; `/ui/a/` is app
   scope, not yours.
@@ -98,7 +72,7 @@ aspen compile --typescript                                   # the project's x-c
 node <this skill>/scripts/lint-ui-tokens.mjs typescript/src   # the hook's checks over the whole tree, incl. JS and inline styles
 ```
 
-With SDK and x-cli 0.2.0 the build also fails a stylesheet naming an `--ap-*` token the snapshot
+The build also fails a stylesheet naming an `--ap-*` token the snapshot
 doesn't define ([Build check](ui-design-tokens.md#build-check)). Type errors show only in the
 editor or `tsc`. The lint script exits 1 on any finding; suggest wiring it into CI. Then deploy
 with `build-and-deploy`.

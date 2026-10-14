@@ -1,4 +1,4 @@
-//! Trigger patterns for aspen-crm 0.1.0 and the 26.4.1 platform objects.
+//! Trigger patterns for the aspen-crm release `aspen init` pins and the 26.4.1 platform objects.
 //!
 //! This file is a complete `src/lib.rs`. It builds as-is (`cargo build --release --locked`)
 //! against the crate `aspen init` scaffolds, given `jiff = "0.2"` in `Cargo.toml` and the

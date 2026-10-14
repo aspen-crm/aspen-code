@@ -6,14 +6,13 @@
 // black-on-black the first time someone opens the page in dark mode, and nothing tightens on
 // a phone. No build step catches that, so this one does.
 //
-// Token NAMES are the build's job with SDK and x-cli 0.2.0: that SDK carries a snapshot of its
-// Public tokens, and that build (`aspen compile --typescript`, which runs the project's `x-cli
-// build code`) fails a stylesheet that names an `--ap-*` property the installed snapshot does
+// Token NAMES are the build's job: the SDK carries a snapshot of its Public tokens, and the
+// build (`aspen compile --typescript`, which runs the project's `x-cli build code`) fails a stylesheet that names an `--ap-*` property the installed snapshot does
 // not define. This guard checks names against that same snapshot -- read from the project's own
 // `node_modules`, never from a copy here that can disagree with it -- for two things the build
 // cannot do: answer at write time, and see JS and inline styles, which the build does not scan.
-// With no installed SDK, or one with no snapshot (0.1.0, what `aspen init` pins), there is
-// nothing authoritative to check against: the name check stands down, and the message says so
+// With no installed SDK (before `npm install`), or one with no snapshot, there is nothing
+// authoritative to check against: the name check stands down, and the message says so
 // instead of pointing at token modules that do not exist.
 //
 // It denies rather than asks: a typo is never intended, and a hardcode has a documented escape
@@ -41,7 +40,7 @@ export function findSdkDirectory (filePath) {
   }
 }
 
-// The same lookup x-cli 0.2.0 does: `dist/manifest.json` names the snapshot, and an SDK
+// The same lookup x-cli does: `dist/manifest.json` names the snapshot, and an SDK
 // version that names none predates snapshots. Returns null when there is no snapshot to read, so
 // callers can tell "no authority" apart from "an empty inventory".
 export function loadSdkTokenNames (sdkDirectory) {
@@ -495,15 +494,14 @@ export function decide (filePath, content, known, whole = true) {
   const glyphs = findGlyphIcons(source)
   if (!unknown.length && !hardcoded.length && !mismatched.length && !native.length && !glyphs.length) return null
 
-  // No snapshot means no typed modules and no `.d.ts` to point at, and the platform injects no
-  // tokens into the page: every pointer below has to say where the names come from instead.
+  // No snapshot means no typed modules and no `.d.ts` to point at: every pointer below has to say where the names come from instead.
   const snapshot = known != null
   const parts = []
 
   if (unknown.length) {
     parts.push(
       'These `--ap-*` names are not Public tokens in the installed `@aspen-crm/sdk`. In a ' +
-      'stylesheet x-cli 0.2.0\'s build (`aspen compile --typescript`) fails on them; in JS or an inline ' +
+      'stylesheet the build (`aspen compile --typescript`) fails on them; in JS or an inline ' +
       'style nothing does, and the declaration is silently dropped:\n' +
       unknown.map(({ line, name, reserved, nearest }) =>
         `  line ${line}: \`${name}\`` +
@@ -540,7 +538,7 @@ export function decide (filePath, content, known, whole = true) {
         `  renders a \`${component}\` but references no ${prefixes.map((p) => `\`${p}*\``).join(' or ')} token` +
         (snapshot
           ? ` — see ${prefixes.map((p) => `\`dist/tokens/comp/${p.slice('--ap-comp-'.length, -1)}.d.ts\``).join(' and ')} in the installed SDK`
-          : ' — the installed SDK ships no token snapshot: pin the 0.2.0 SDK the instance\'s CDN serves for its typed names (custom-ui `SKILL.md`, "Before the first file"), or read them off a native element')
+          : ' — no installed SDK ships a token snapshot to name them: `npm install` in `typescript/`, or read them off a native element')
       ).join('\n') +
       '\n\nStart from the component\'s tokens for the parts it publishes, and compose from ' +
       '`--ap-sem-*` only for what it does not (a magnitude bar in a cell, say). If this is ' +
@@ -582,11 +580,10 @@ export function decide (filePath, content, known, whole = true) {
         'token or component family fits. In JS and ' +
         'inline styles, import them from `@aspen-crm/sdk/tokens/sem` or `/comp` instead of ' +
         'writing the string. '
-      : 'The installed `@aspen-crm/sdk` ships no token snapshot (0.1.0, what `aspen init` pins, ' +
-        'has none), so there are no typed token modules, nothing checks a name, and the platform ' +
-        'does not render a page on it. Pin the 0.2.0 SDK and x-cli the instance\'s CDN serves ' +
-        '(custom-ui `SKILL.md`, "Before the first file") and tell the human you did; until then, ' +
-        'read names off a native element and keep the light value as the `var()` fallback. ') +
+      : 'No installed `@aspen-crm/sdk` here ships a token snapshot, so there are no typed token ' +
+        'modules and nothing checks a name. Run `npm install` in `typescript/` (it installs the ' +
+        'SDK `aspen init` pinned) and tell the human you did; until then, read names off a native ' +
+        'element and keep the light value as the `var()` fallback. ') +
     'If a value genuinely has no token, keep it and put ' +
     '`aspen-token-exempt: <reason>` in a comment on that line or the line above.'
   )
