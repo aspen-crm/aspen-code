@@ -67,8 +67,8 @@ const isFile = (p) => { try { return statSync(p).isFile() } catch { return false
 const isDir = (p) => { try { return statSync(p).isDirectory() } catch { return false } }
 
 // Where the CLI is, or null. aspenup puts its `aspen` proxy in $ASPEN_HOME/bin (default
-// ~/.aspen/bin). The user puts that on PATH in their shell profile -- which a host started before
-// then has not re-read, if they did it at all -- so the proxy dir is checked directly as well.
+// ~/.aspen/bin). The installer leaves PATH alone (--no-modify-path), so the proxy dir is checked
+// directly as well.
 export function findCli (env = process.env, home = homedir()) {
   const names = isWindows ? ['aspen.exe', 'aspen.cmd', 'aspen'] : ['aspen']
   const onPath = (env.PATH || env.Path || '').split(delimiter).filter(Boolean)
@@ -184,7 +184,7 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
 
   const lines = []
   if (!cli.onPath) {
-    lines.push(`The Aspen CLI is installed at \`${cli.path}\` but this session's PATH does not have it yet. Run it by that full path. If the user has not put it on their PATH, offer them the line to add (\`getting-started\` step 1); never edit their shell profile yourself.`)
+    lines.push(`The Aspen CLI is installed at \`${cli.path}\` but this session's PATH does not have it yet. Run it by that full path; don't suggest a PATH or shell-profile change.`)
   }
 
   const aspenup = join(dirname(cli.path), isWindows ? 'aspenup.exe' : 'aspenup')

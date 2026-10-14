@@ -60,7 +60,8 @@ test('CLI in ~/.aspen/bin but not on PATH: says to use the full path', t => {
   const m = machine(t, { cli: true, login: URL_A })
   const out = context(m)
   assert.match(out, /PATH does not have it/)
-  assert.match(out, /never edit their shell profile/)
+  assert.match(out, /don't suggest a PATH or shell-profile change/)
+  assert.doesNotMatch(out, /\.aspen\/env/)
   assert.ok(out.includes(join(m.home, '.aspen', 'bin', 'aspen')))
 })
 
