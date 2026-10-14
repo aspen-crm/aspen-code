@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { declaredTriggers, keepFresh, pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
+import { keepFresh, pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
 import { session, signIn, signOut, socketFor } from '../skills/instance-migration/scripts/signin.mjs'
 
 const plugin = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -932,28 +932,6 @@ test('a pilot loads whole an object other entries match by a field, so their row
   assert.match(readFileSync(join(s.ws, 'reports', 'load.md'), 'utf8'), /Loaded whole in this pilot.*user_p → user_p/)
 })
 
-// An instance directory's server code: one trigger on account_p whose before half sets description_p.
-function serverCode (dir, object = 'account_p', field = 'description_p') {
-  mkdirSync(join(dir, 'rust', 'src'), { recursive: true })
-  writeFileSync(join(dir, 'rust', 'aspen.server.json'), JSON.stringify({ 'record-triggers': [{ name: 'stamp_c', object, events: ['before_insert', 'before_update'] }] }))
-  writeFileSync(join(dir, 'rust', 'src', 'lib.rs'), 'mod stamping;\nimpl stamp_c for Entrypoints {\n  fn before_insert(context: &BeforeInsertContext) -> error::Result<()> {\n    stamping::before_half(context.batch())\n  }\n}\n')
-  writeFileSync(join(dir, 'rust', 'src', 'stamping.rs'), `pub fn before_half(batch: &MutableBatch) -> error::Result<()> {\n  for record in batch.iter() { record.set("${field}", FieldState::Absent); }\n  Ok(())\n}\n`)
-}
-
-test('the plan names the triggers on target objects and the fields they set; draft leaves those fields out', async t => {
-  const s = await setup(t)
-  serverCode(s.dir)
-  assert.deepEqual(declaredTriggers(s.dir), [{ name: 'stamp_c', object: 'account_p', events: ['before_insert', 'before_update'], writes: ['description_p'] }])
-  await s.ready()
-  await s.run('load', s.ws)
-  assert.match(readFileSync(join(s.ws, 'reports', 'plan.md'), 'utf8'), /## Triggers on target objects[\s\S]*\| stamp_c \| account_p \| before_insert, before_update \| description_p \|/)
-  serverCode(s.dir, 'project_c', 'budget_c')
-  const r = await s.run('draft', s.ws, '--objects', 'project_c')
-  assert.equal(r.status, 0, r.stderr)
-  const budget = s.mapping().objects.find(o => o.source === 'project_c').fields.find(e => e.from === 'budget_c')
-  assert.deepEqual(budget, { from: 'budget_c', drop: true, note: 'the stamp_c trigger writes budget_c' })
-})
-
 test('byParent maps an object-dependent picklist by the object the row points at', async t => {
   const s = await setup(t)
   s.src.records.role_c.push({ id_p: 'r3', ct_p: '2023-01-01T00:00:02.000Z', person_c: 'p3', company_c: null })
@@ -1027,14 +1005,14 @@ test('preflight writes one test row per object, finds what the describe does not
   assert.equal(person.row.first_name_p, 'Ada', 'the test row carries a real value from the extract')
   assert.match(person.row.email_p, /^preflight\.\w+\.ada@x\.com$/, 'a unique email is made unique and keeps its domain')
   assert.equal(pf.objects.company_c.rejected.description_p.finding, 'set by the server', 'a refusal for no field is narrowed to the field')
-  assert.equal(pf.objects.user_p.objectRejected.finding, 'license cap')
+  assert.match(pf.objects.user_p.objectRejected.message, /No free user licenses/)
   for (const o of Object.values(pf.objects)) assert.equal(o.written, o.deleted, `${o.target}: every test row written was deleted`)
   assert.deepEqual(s.tgt.records.contact_p ?? [], [])
   assert.deepEqual(s.tgt.records.account_p ?? [], [])
   const report = readFileSync(join(s.ws, 'reports', 'preflight.md'), 'utf8')
   assert.match(report, /\| phone_p \| required, not declared \| A contact needs a phone number\. \|/)
   assert.match(report, /\| description_p \| set by the server \|.*drop it from the mapping/)
-  assert.match(report, /\| \(object\) \| license cap \|/)
+  assert.match(report, /\| \(object\) \| refused whatever the row holds \| No free user licenses/)
   assert.match(report, /\| last_met_c \| stored differently than sent \| sent `2024-05-06T07:08:09\.100Z`, stored `2024-05-06T07:08:09\.000Z`/)
   assert.doesNotMatch(report, /ada@x\.com/, 'source values stay out of the committed report')
 })

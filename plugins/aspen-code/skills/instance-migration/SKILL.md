@@ -78,19 +78,14 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
 - The pilot writes real records, and undoing a bad full load means deleting what it wrote: never
   skip it, and settle values with the user before it rather than testing them on it.
-- `preflight` finds what the describe doesn't declare (a license cap, a domain rule, a field the
-  server sets, a requirement it doesn't mark, a value stored differently) on one test row per
-  object. It is a write: ask first, naming the triggers it lists. A record a trigger creates from a
-  test row is not deleted.
-- `--limit` holds back every object except those other entries match by a field (`user_p` or
-  `team_p` matched by email): those load whole, so the rows matching on them find them.
+- `preflight` finds what the describe doesn't declare (a refusal of the object itself, a field the
+  target refuses or sets on its own, a requirement it doesn't mark, a value stored differently) on
+  one test row per object. It is a write: ask first.
+- `--limit` holds back every object except those other entries match by a field (owners matched
+  by email): those load whole, so the rows matching on them find them.
 - Failures the user agrees to leave out go into `accept` ([mapping-format.md](mapping-format.md)),
   with their reason; a load whose every failure matches one exits 0, and verify doesn't count those
   rows as not loaded. Never add an entry the user didn't agree to.
-- `reports/plan.md` lists the instance's own record triggers on the target objects
-  (`rust/aspen.server.json`) and the fields each sets; draft drops a field a trigger sets. A trigger
-  that creates records fires for every migrated row too: gate it first (`salesforce-migration`,
-  `## Triggers that create records`).
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →
   `build-and-deploy`, then `describe W --side target`.
 - A load is safe to run again. On a server error for a batch, run again with `--batch 50`.

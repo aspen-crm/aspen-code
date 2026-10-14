@@ -101,7 +101,5 @@ Other keys on a field entry:
 - `schema/target.json`'s `currencies` lists the codes the instance has a `currency_p` record for,
   and `picklistsByParent` each object-dependent picklist field (`"<object>.<field>"`) with its
   `dependsOn` and the values each parent object allows.
-- A field the instance's own trigger sets (`record.set` in the code of a trigger
-  `rust/aspen.server.json` declares on the object) is dropped by `draft`, naming the trigger.
 - A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.

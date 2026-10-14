@@ -45,21 +45,20 @@ From the target instance directory, with `aspen doctor` clean. `W` is `data/migr
 - `plan` is describe, the target's describe, probe and draft in one run. `--keep-target` reuses
   `schema/target.json` (no sign-in); `--redraft` drafts settled objects again. An object that had
   no target is drafted again on its own once the target has one.
-- `preflight` is a write with its own ask. Without `--run` it lists each test row and the triggers
-  it would fire; ask once, naming the target and the objects, and say each row is deleted right
-  after it is read back. It finds what the describe doesn't declare: a license cap, a domain rule
-  on a unique text (a username), a field the server sets, a requirement it doesn't mark, a value
-  stored differently than sent. Bring its findings into the decision round as proposals.
+- `preflight` is a write with its own ask. Without `--run` it lists each test row; ask once,
+  naming the target and the objects, and say each row is deleted right after it is read back. It
+  finds what the describe doesn't declare: a refusal of the object itself, a field the target
+  refuses or sets on its own, a requirement it doesn't mark, a value stored differently than sent.
+  Bring its findings into the decision round as proposals.
 - The step-7 chain stops at the first step that fails: a pilot with a failed row never reaches
   the full load. Bring the failures to the user, fix the mapping with them, dry-run again, and
   ask again before any `--run`. A pilot is a write: re-running it needs a new yes.
-- Failures the user agrees to leave out (a contact role whose contact is outside the export, a
-  relation pointing at a lead) go into `accept` in `mapping.json`, by object, field and the
-  report's Problem text, with their reason in `note` and the count in `max`
+- Failures the user agrees to leave out go into `accept` in `mapping.json`, by object, field and
+  the report's Problem text, with their reason in `note` and the count in `max`
   ([mapping-format](../instance-migration/mapping-format.md)). A run whose every failure matches
   one exits 0, so the chain completes. Never add an entry the user didn't agree to.
-- `--limit` holds back every object but those other entries match by a field: `User → team_p`
-  loads whole in a pilot, so the owners and `who_p` rows matched to it by email find it.
+- `--limit` holds back every object except those other entries match by a field (owners matched
+  by email): those load whole in a pilot, so the rows matching on them find them.
 - An export regenerated after `init` is refused: `init` again, then `plan`. Owner lookups read
   `User.csv` from the export; without one, `init` with `--org` as well.
 - Draft and the dry run read the target's rules from `schema/target.json` (lengths, ranges,
@@ -68,8 +67,8 @@ From the target instance directory, with `aspen doctor` clean. `W` is `data/migr
   finds more on a test row; the rest shows on the pilot.
 - Load order, id remapping, resume and the second pass for self-lookups are `migrate.mjs`'s job.
   A load is safe to run again.
-- Done when verify reports 0 differences and 0 not loaded beyond what `accept` leaves out, any
-  trigger gate is back off, and the user has looked at records in the app. Commit `mapping.json`,
+- Done when verify reports 0 differences and 0 not loaded beyond what `accept` leaves out, and
+  the user has looked at records in the app. Commit `mapping.json`,
   `mapping/fields.csv` and `reports/`; the workspace's `.gitignore` keeps record data out of git.
 
 ### Step 2: scope comes first
@@ -87,34 +86,13 @@ only what needs the user:
 - **Needs your decision**: every todo, each with your proposal already filled in. A picklist
   value gets the target item closest in meaning; its count in the data says how much it matters.
 - **Found by preflight**: each finding with its proposal: drop a field the server sets, map a
-  value for a requirement it doesn't declare, leave out an object it caps.
+  value for a requirement it doesn't declare, leave out an object it refuses.
 - **Changed on the way in**: the rows draft proposed `normalize`, `truncate` or `distinctFrom`
   for, and the fields Aspen sets itself, so the user sees what will differ from Salesforce.
 
 Then write `mapping.json` from their answers, all at once. Never settle a todo, or change a
 proposal, without the user's answer. Don't ask about empty or Salesforce-owned fields, and ask
 about a key only if the target may already hold these records.
-
-## Triggers that create records
-
-`reports/plan.md` lists the instance's own record triggers on the target objects
-(`rust/aspen.server.json`) and the fields each sets. A trigger that creates records on a save
-creates them for migrated history too: one that makes an engagement when a deal is closed won
-makes one per won deal loaded, beside the engagements being migrated. Before the pilot, gate it:
-
-1. The trigger reads a config var and returns early when it is on. Where the instance's
-   `aspen-crm` crate has `src/services/config_var.rs`, build the request with
-   `services.config_var().request("migration_mode_c").build()` and read it with
-   `services.config_var().fetch(request)`: `Ok(Some(var))` whose `var.value()` is `on` means
-   skip; treat everything else (no variable, no value, an error) as off, so a missing variable
-   never stops the trigger in normal use. Without that module the trigger can't read one: deploy
-   it after the load instead (`server-code`).
-2. Declare `metadata/custom/config_var_p/migration_mode_c.json` (`metadata`), and set the value in
-   `./config_vars.json`: `{"variables": [{"name": "migration_mode_c", "value": "on"}]}`.
-3. Deploy (`build-and-deploy`): `save-package` uploads `config_vars.json`, and clears every var the
-   file doesn't list. `aspen move upload-config-vars` uploads it alone.
-4. Prove it on the pilot: count what the trigger creates before and after.
-5. After the load, set it to `off` and upload again. Say so in the final message.
 
 ## People: users, team members, contacts
 
@@ -148,11 +126,10 @@ deleted yet. Only a field that **matched a target field and still does not fit**
 | `AccountContactRelation`, `OpportunityContactRole`, `CaseContactRole` | `contact_role_p`, never `contact_rel_p` (a team member's relationship strength with a contact). The parent fills `what_p`, `Roles`/`Role` is proposed for `role_p`. Keyed on `contact_role_chk_p` over `contact_p` and `what_p`, so a role Aspen's triggers already derived (a primary account or contact, an opportunity's customer, a case's contact) is matched, not inserted twice. `AccountContactRelation` extracts only `IsDirect = false`. |
 | `AccountTeamMember`, `OpportunityTeamMember`, `CaseTeamMember` | `team_role_p`: the User matched to `team_p` by email, the parent in `what_p`, keyed on `team_role_chk_p` (the owner's row is already derived). `CaseTeamMember` extracts only users; a case's contacts are `CaseContactRole`. |
 | `Task`, `Event` and `TaskRelation`, `EventRelation` | `task_p`/`meeting_p`. The activity's own row names its owner in `who_p` (a team member) and is not given `WhoId`; each contact in its relation is a child row (`parent_p`), copying the subject, start and due date it must carry. Users and leads in a relation are not carried. Migrate the relations with their activity. |
-| `Event`, `Product2`, `Period`, `User`, `EmailMessage`, `OpportunityLineItem`, `Pricebook2`, `QuoteLineItem` | `meeting_p`, `product_p`, `fiscal_period_p`, `team_p`, `email_p`, `opportunity_line_p`, `pricebook_p`, `quote_line_p`, by their descriptions. `Email`/`Phone` on a contact are `work_email_p`/`office_phone_p`; `ProductCode` is `sku_p`; `UnitPrice`, `TotalPrice` and `PricebookEntryId` on a line are `price_p`, `line_total_p` and `pbe_p`. |
-| A lookup named for its object (`OpportunityId`, `Product2Id`) | The target field named for that object (`opportunity_p`, `product_p`): `Id` and a trailing digit dropped, `matched by name without Id`. |
+| `Event`, `Product2`, `Period`, `User`, `EmailMessage` | `meeting_p`, `product_p`, `fiscal_period_p`, `team_p`, `email_p`, by their descriptions. `Email`/`Phone` on a contact are `work_email_p`/`office_phone_p`; `ProductCode` is `sku_p`. |
+| A lookup named for its object (`<Object>Id`, `<Object>2Id`) | The target field named for that object (`<object>_p`): `Id` and a trailing digit dropped, `matched by name without Id`. |
 | A field the exporting user may not create in Salesforce | Mapped when a target field matches, with a note: createable is the user's permission, not the data's. Unmatched, dropped silently. |
 | Two Salesforce fields matching one target field | The first keeps it; the other is dropped as `target taken`. |
-| A field this instance's trigger sets (`record.set` in the code of a trigger `rust/aspen.server.json` declares on that object) | Dropped, naming the trigger: a loaded value would fight it. |
 | A phone or URL field | `"normalize": "phone"` (E.164 where the number says its country) or `"url"` (https:// added, cut or blank when too long); `"linkedin"` for `linkedin_profile_p`, in Aspen's own form. What can't be converted is left blank and counted by the dry run. |
 | Text longer than the target allows | `"truncate": true`, with the longest value in the note. |
 | Contact phones and emails | `"distinctFrom"`: office or home blank when it equals mobile, personal email when it equals work. The CRM refuses the same value in both. |
@@ -197,10 +174,9 @@ A proposal is not a decision: change `mapping.json` only after the user answers.
 | "These todos are obvious, I'll settle them" | Propose; the user decides. One round per object keeps it quick. |
 | "The pilot hit a rule; I'll fix it and run the pilot again" | Every `--run` needs its own yes. Dry-run the fix, then ask. |
 | "These failures are expected; I'll run the steps one by one" | Put them in `accept` with the user's reason and `max`; the chain then completes and still stops on anything new. |
-| "Preflight is only a test row; no need to ask" | It writes to the target. Ask, and say which triggers fire. |
-| "Won deals will load fine; the trigger guards against duplicates" | Its guard can't see engagements the load hasn't written yet. Gate it with a config var first. |
+| "Preflight is only a test row; no need to ask" | It writes to the target. Ask first. |
 | "`contact_rel_p` sounds like `AccountContactRelation`" | Names mislead. Map by the `description` `reports/gaps.md` quotes for each Aspen object and field, or ask. |
-| "I'll ask about all 464 fields" | Ask only about what matched badly or holds data. The rest is a drop list the user skims. |
+| "I'll ask about every field" | Ask only about what matched badly or holds data. The rest is a drop list the user skims. |
 | "I'll create Aspen fields for the Salesforce fields that don't fit" | A field can't be deleted yet. `lean-data-model` first, and only for a use the user named. |
 | "I'll design a lifecycle for the new object" | Only if the user asks. Migrated records need a place to land, not a workflow. |
 | "I'll ask the user for a Salesforce token" | The `sf` CLI holds the auth. If it has no org, the user runs `sf org login web`. |

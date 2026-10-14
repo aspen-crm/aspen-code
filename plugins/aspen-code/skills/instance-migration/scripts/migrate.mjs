@@ -30,7 +30,7 @@
 // verify, or a preflight test row could not be deleted; 2 bad invocation, the mapping or the
 // instance is not ready, or a sign-in failed.
 
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IDLE_MS, SignInError, session as openSession, signOut } from './signin.mjs'
@@ -305,74 +305,17 @@ function allowsOn (lists, object, field, f, value) {
   return on.length ? on : (lists.picklistItems?.[f.picklist] ?? []).find((i) => i.name === value)?.parentObjects ?? null
 }
 
-// ---- the instance directory's record triggers
-
-// The record triggers rust/aspen.server.json declares, and the fields each one's Rust code sets on
-// the record it fires on (`record.set("<field>", …)`): read from its impl block and the modules
-// that block calls, plus a module named for the trigger. Best effort and read-only: a trigger
-// whose code this cannot follow lists no fields; callers keep only fields of its object.
-export function declaredTriggers (root) {
-  let decl
-  try { decl = JSON.parse(readFileSync(join(root, 'rust', 'aspen.server.json'), 'utf8'))['record-triggers'] } catch { return [] }
-  if (!Array.isArray(decl)) return []
-  const src = join(root, 'rust', 'src')
-  const files = new Map()
-  const walk = (d, depth) => {
-    let entries = []
-    try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
-    for (const x of entries) {
-      if (files.size >= 500) return
-      const p = join(d, x.name)
-      if (x.isDirectory() && depth < 6) walk(p, depth + 1)
-      else if (x.isFile() && x.name.endsWith('.rs')) { try { files.set(p, readFileSync(p, 'utf8')) } catch {} }
-    }
-  }
-  walk(src, 0)
-  return decl.filter((t) => /^\w+$/.test(t?.name ?? '') && typeof t.object === 'string').map((t) => {
-    const bodies = []
-    for (const s of files.values()) {
-      const at = new RegExp(`\\bimpl\\s+${t.name}\\s+for\\s+\\w+\\s*\\{`).exec(s)
-      if (at) bodies.push(braced(s, at.index + at[0].length - 1))
-    }
-    const mods = new Set([t.name.replace(/_c$/, '')])
-    for (const b of bodies) for (const c of b.matchAll(/\b([a-z_][a-z0-9_]*)::[a-z_][a-z0-9_]*\s*\(/g)) mods.add(c[1])
-    const code = [...bodies, ...[...mods].flatMap((x) => [files.get(join(src, `${x}.rs`)), files.get(join(src, x, 'mod.rs'))]).filter(Boolean)]
-    const writes = [...new Set(code.flatMap((s) => [...s.matchAll(/\.set\(\s*"([a-z][a-z0-9_]*)"/g)].map((c) => c[1])))]
-    return { name: t.name, object: t.object, events: Array.isArray(t.events) ? t.events : [], writes }
-  })
-}
-
-// The text of the block whose opening brace is at `open`.
-function braced (s, open) {
-  let depth = 0
-  for (let i = open; i < s.length; i++) {
-    if (s[i] === '{') depth++
-    else if (s[i] === '}' && --depth === 0) return s.slice(open, i + 1)
-  }
-  return s.slice(open)
-}
-
-// The fields of `object` a declared trigger writes, each with the trigger's name.
-export function triggerWrites (triggers, tgt, object) {
-  const out = new Map()
-  for (const t of triggers) if (t.object === object) for (const f of t.writes) if (tgt.objects[object]?.fields[f] && !out.has(f)) out.set(f, t.name)
-  return out
-}
-
 // ---- draft: match by name and type; every gap becomes a todo for the user to settle
 
-function draftObject (name, src, tgt, migrating, triggers = []) {
+function draftObject (name, src, tgt, migrating) {
   const S = src.objects[name]
   const target = tgt.objects[name] ? name : null
   const T = target && tgt.objects[target]
   const entry = { source: name, target, key: null, onMatch: 'skip' }
   if (!T) entry.todo = `no object named ${name} on the target: set "target" to an existing object, create one, or remove this entry`
-  const owned = T ? triggerWrites(triggers, tgt, target) : new Map()
   const fields = []
   for (const [fname, f] of writable(S)) {
     if (f.type === 'id' && f.subtype === 'file') { fields.push({ from: fname, drop: true, note: 'file fields are not migrated' }); continue }
-    // A trigger owns this field on the target: a loaded value would fight it, or be overwritten.
-    if (owned.has(fname)) { fields.push({ from: fname, drop: true, note: `the ${owned.get(fname)} trigger writes ${fname}` }); continue }
     const tf = T?.fields[fname]
     if (!tf || SYSTEM.has(fname)) {
       fields.push({ from: fname, todo: T ? `no field ${fname} on ${target}: map it to another field ("target"), transform it ("expr"), create it, or drop it ("drop": true)` : 'choose a target field once the object is mapped, or drop it' })
@@ -401,7 +344,7 @@ function draftObject (name, src, tgt, migrating, triggers = []) {
   }
   if (T) {
     for (const [fname, tf] of writable(T)) {
-      if (tf.required && !owned.has(fname) && !fields.some((e) => e.target === fname)) fields.push({ target: fname, todo: 'required on the target and nothing maps to it: set "from", "value" or "expr"' })
+      if (tf.required && !fields.some((e) => e.target === fname)) fields.push({ target: fname, todo: 'required on the target and nothing maps to it: set "from", "value" or "expr"' })
     }
     entry.key = fields.find((e) => e.target && !e.todo && !e.lookup && T.fields[e.target]?.unique)?.target ?? null
   }
@@ -928,8 +871,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   }
   const accepted = accepting(m)(failedRows)
   for (const [source, ids] of accepted.ids) stats[source].accepted = ids.size
-  const triggers = declaredTriggers(ws.root).filter((t) => m.objects.some((o) => o.target === t.object))
-  const report = loadReport(m, order, stats, failedRows, { run, limit, changes, accepted, whole, triggers })
+  const report = loadReport(m, order, stats, failedRows, { run, limit, changes, accepted, whole })
   writeText(ws.path('reports', run ? 'load.md' : 'plan.md'), report)
   const total = (k) => Object.values(stats).reduce((n, s) => n + s[k], 0)
   const incomplete = limit == null && (total('waiting') > 0 || total('pending') > 0)
@@ -937,7 +879,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   return total('failed') > total('accepted') || incomplete ? 1 : 0
 }
 
-function loadReport (m, order, stats, failedRows, { run, limit, changes = new Map(), accepted, whole = new Set(), triggers = [] }) {
+function loadReport (m, order, stats, failedRows, { run, limit, changes = new Map(), accepted, whole = new Set() }) {
   const lines = [
     run ? '# Load' : '# Migration plan (dry run)', '',
     `Source: ${m.source.url}  `, `Target: ${m.target.url}  `, `Run: ${new Date().toISOString()}${limit != null ? ` (pilot: at most ${limit} new records per object)` : ''}`, '',
@@ -951,10 +893,6 @@ function loadReport (m, order, stats, failedRows, { run, limit, changes = new Ma
   lines.push('', 'Waiting: the record points to a parent that is not loaded yet; it loads on a later run, once the parent does. Held: over `--limit`. Accepted: failed rows that `accept` in mapping.json leaves out.')
   const wholes = order.filter(({ entry: o }) => whole.has(o.source))
   if (wholes.length) lines.push('', `Loaded whole in this pilot, because other objects match their records by a field: ${wholes.map(({ entry: o }) => `${o.source} → ${o.target}`).join(', ')}.`)
-  if (triggers.length) {
-    lines.push('', '## Triggers on target objects', '', 'Declared in `rust/aspen.server.json`. Each fires on every row this load writes; one that creates records creates them for migrated rows too. Gate it before `--run`.', '', '| Trigger | Object | Events | Fields it sets |', '|---|---|---|---|')
-    for (const t of triggers) lines.push(`| ${t.name} | ${t.object} | ${t.events.join(', ')} | ${t.writes.join(', ')} |`)
-  }
   const second = order.filter((s) => s.deferred.size)
   if (second.length) {
     lines.push('', '## Filled by the second pass', '')
@@ -1069,16 +1007,14 @@ async function verify (ws, m, tgt, { sample }) {
 }
 
 // ---- preflight: one test row per object, written, read back and deleted, to find what the
-// describe does not declare (a license cap, a domain rule on a unique text, a field the server
-// sets, a requirement it does not mark, a value it stores differently) before the decision round
-// rather than on the pilot. At most one test row per object exists at a time.
+// describe does not declare (a refusal of the object itself, a field the target refuses or sets on
+// its own, a requirement it does not mark, a value it stores differently) before the decision
+// round rather than on the pilot. At most one test row per object exists at a time.
 
 const PROBE_ATTEMPTS = 16
 // What a refusal means, by its text, and what that means for the load.
 const FINDINGS = [
-  ['license cap', /licen[cs]e|\bseats?\b|maximum number of (users|logins)/i, 'every row fails until the instance has a free license: leave the object out, or add licenses first'],
   ['set by the server', /system fields?|read[- ]only|not (writable|creatable|updatable)|cannot be (set|written)/i, 'Aspen sets it: drop it from the mapping'],
-  ['domain rule', /domain/i, 'a value that does not meet it fails: map one that does, or drop the field'],
   ['required', /required|must (have|be given|contain) a value|cannot be (blank|empty)|mandatory/i, 'a row without a value fails: map a field or a constant'],
   ['unique', /unique|already (in use|exists)|duplicate/i, 'a value already on the target, or twice in the source, fails'],
   ['type', /invalid type|not a valid|integer|whole number|decimal/i, 'a value of that shape fails: convert it ("expr") or drop the field']
@@ -1250,8 +1186,8 @@ async function probe (tgt, o, TO, start, fill) {
     }
     if (moved) continue
     const why = r.failures.map(messageOf).join('; ')
-    // Refused for no field the row names: cut to what it must carry, it tells the object's own
-    // refusal (a license cap) from a field among the rest.
+    // Refused for no field the row names: cut to what it must carry, it tells a refusal of the
+    // object itself from a field among the rest.
     const must = (n) => TO.fields[n]?.required || n in res.requiredUndeclared || unit(n).some((x) => TO.fields[x]?.required)
     const base = Object.fromEntries(Object.entries(row).filter(([n]) => must(n) || must(polyOf(n) ?? n)))
     if (Object.keys(base).length === Object.keys(row).length) { res.objectRejected = { finding: findingOf(why), message: why }; break }
@@ -1294,7 +1230,7 @@ export function preflightFindings (res, TO) {
   const rows = []
   const shown = (v, f) => v == null ? 'blank' : ['number', 'currency', 'checkbox', 'date', 'datetime'].includes(f?.type) ? `\`${v}\`` : null
   if (res.notProbed) rows.push({ field: '(object)', found: 'not probed', said: res.notProbed, load: 'the pilot is the first write to it' })
-  if (res.objectRejected) rows.push({ field: '(object)', found: res.objectRejected.finding, said: res.objectRejected.message, load: forLoad(res.objectRejected.finding) })
+  if (res.objectRejected) rows.push({ field: '(object)', found: 'refused whatever the row holds', said: res.objectRejected.message, load: 'every row fails: leave the object out, or settle what the target said first' })
   for (const [n, msg] of Object.entries(res.requiredUndeclared ?? {})) rows.push({ field: n, found: 'required, not declared', said: msg, load: forLoad('required') })
   for (const [n, r] of Object.entries(res.rejected ?? {})) rows.push({ field: n, found: r.finding, said: r.message, load: forLoad(r.finding) })
   for (const [n, c] of Object.entries(res.coercions ?? {})) {
@@ -1319,7 +1255,6 @@ function preflightReport (out, T) {
     const set = Object.keys(res.serverSet ?? {})
     if (set.length) lines.push('', `Aspen filled on its own: ${set.join(', ')}.`)
     for (const n of res.notes ?? []) lines.push('', `- ${n}`)
-    if (res.triggers?.length && res.written) lines.push('', `Fired on the test row: ${res.triggers.join(', ')}. A record a trigger created from it stays.`)
     for (const u of res.undeleted ?? []) lines.push('', `**Not deleted:** test row ${u.id} (${cell(u.why)}). Delete it in the app.`)
   }
   return lines.join('\n') + '\n'
@@ -1333,14 +1268,12 @@ async function preflight (ws, m, tgt, { run, objects }) {
   if (!entries.length) throw new Stop('no object in mapping.json has a target on this instance yet; settle the targets first')
   const pick = picker(tgt, T)
   const sampleOf = samples(ws)
-  const triggers = declaredTriggers(ws.root)
   const out = { url: m.target.url, run: new Date().toISOString(), objects: {} }
   let stuck = 0
   for (const o of entries) {
     const TO = T.objects[o.target]
     const tag = Math.random().toString(36).slice(2, 8)
-    const fires = triggers.filter((t) => t.object === o.target).map((t) => t.name)
-    const res = out.objects[o.source] = { target: o.target, triggers: fires }
+    const res = out.objects[o.source] = { target: o.target }
     if (TO.deletable === false) {
       res.notProbed = `${o.target} records cannot be deleted, so a test row would stay`
       say(`${o.source} → ${o.target}: not probed; ${res.notProbed}`)
@@ -1349,7 +1282,7 @@ async function preflight (ws, m, tgt, { run, objects }) {
     const { row, notes } = await testRow(o, TO, T, m, sampleOf(o.source), pick, tag)
     Object.assign(res, { row, notes })
     if (!run) {
-      say(`${o.source} → ${o.target}: a test row of ${Object.keys(row).length} fields${fires.length ? `; fires ${fires.join(', ')}` : ''}`)
+      say(`${o.source} → ${o.target}: a test row of ${Object.keys(row).length} fields`)
       for (const [n, v] of Object.entries(row)) say(`  ${n} = ${String(v).length > 60 ? `${String(v).slice(0, 57)}...` : v}`)
       for (const n of notes) say(`  (${n})`)
       continue
@@ -1475,8 +1408,7 @@ async function run (cmd, ws, m, opts, open) {
     const have = new Set(m.objects.map((o) => o.source))
     const migrating = new Set([...have, ...names])
     const added = names.filter((n) => !have.has(n))
-    const triggers = declaredTriggers(ws.root)
-    for (const n of added) m.objects.push(draftObject(n, src, tgt, migrating, triggers))
+    for (const n of added) m.objects.push(draftObject(n, src, tgt, migrating))
     writeJson(ws.path('mapping.json'), m)
     for (const o of m.objects.filter((x) => added.includes(x.source))) {
       const n = todos({ objects: [o] }).length

@@ -12,7 +12,7 @@
 //   node sfmigrate.mjs extract <workspace> [--limit N]  SFDC records -> extract/
 //
 // With --from-export the source is a Salesforce export on disk (manifest.json, describe/<Object>.json
-// and one CSV per object, as export_g17.py writes it) and Salesforce is not reached at all: describe,
+// and one CSV per object) and Salesforce is not reached at all: describe,
 // probe and extract read the files, so a filtered or date-shifted export loads exactly as it is.
 //
 // Then the Aspen side is migrate.mjs in the instance-migration skill, unchanged:
@@ -33,7 +33,7 @@ import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { TARGET_RULES, declaredTriggers, preflightFindings, todos, triggerWrites } from '../../instance-migration/scripts/migrate.mjs'
+import { TARGET_RULES, preflightFindings, todos } from '../../instance-migration/scripts/migrate.mjs'
 
 const MIGRATE = fileURLToPath(new URL('../../instance-migration/scripts/migrate.mjs', import.meta.url))
 
@@ -417,10 +417,7 @@ const SYNONYMS = {
   title: ['job_title'],
   amount: ['value'],
   web_site: ['website'],
-  photo_url: ['photo', 'image'],
-  unit_price: ['price'], // opportunity_line_p.price_p, pricebook_entry_p.price_p
-  total_price: ['line_total'],
-  pricebook_entry_id: ['pbe'] // opportunity_line_p.pbe_p, the price book entry the line was priced from
+  photo_url: ['photo', 'image']
 }
 
 // Salesforce junctions Aspen models as one polymorphic object. contact_role_p "associates a
@@ -478,12 +475,8 @@ const PARTICIPANTS = {
 // Salesforce objects whose Aspen counterpart has another name, each checked against the target's
 // description: meeting_p "a scheduled or logged meeting", product_p "sellable product in the
 // product catalog", fiscal_period_p "a named, dated period in the fiscal calendar", team_p "an
-// employee, contractor, or partner", email_p "customer emails". The line items and the price book
-// do not reach their counterpart by normalize() either (opportunity_line_item, pricebook2).
-const OBJECT_SYNONYMS = {
-  Event: 'meeting', Product2: 'product', Period: 'fiscal_period', User: 'team', EmailMessage: 'email',
-  OpportunityLineItem: 'opportunity_line', Pricebook2: 'pricebook', QuoteLineItem: 'quote_line'
-}
+// employee, contractor, or partner", email_p "customer emails".
+const OBJECT_SYNONYMS = { Event: 'meeting', Product2: 'product', Period: 'fiscal_period', User: 'team', EmailMessage: 'email' }
 
 // What a user must hear before an object loads, keyed by the Salesforce object.
 const OBJECT_NOTES = {
@@ -611,8 +604,8 @@ function matchField (fname, f, idx) {
   const byLabel = idx.byLabel.get(normalize(f.label))
   if (byLabel) return [byLabel, 'label']
   for (const alt of SYNONYMS[n] ?? []) if (idx.byName.has(alt)) return [idx.byName.get(alt), 'synonym']
-  // A Salesforce lookup is its object's name plus Id (OpportunityId, Product2Id); Aspen names the
-  // field for the object alone (opportunity_p, product_p).
+  // A Salesforce lookup is its object's name plus Id, sometimes with a digit (<Object>2Id); Aspen
+  // names the field for the object alone (<object>_p).
   const stem = n.replace(/_id$/, '')
   if (stem !== n) for (const s of [stem, stem.replace(/_?\d+$/, '')]) if (s && idx.byName.has(s)) return [idx.byName.get(s), 'name without Id']
   return [null, null]
@@ -665,7 +658,7 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     // A computed field is also not createable, but it carries real data and its rule has to go
     // somewhere on the target, so it is a gap to report rather than a silent drop. Createable is
     // also the exporting user's permission, not a property of the data: a field the user may not
-    // create (every field of a price book entry, in some orgs) still maps when a target field matches.
+    // create still maps when a target field matches.
     const locked = !f.sf.createable && !f.sf.calculated
     if (SF_SYSTEM.has(fname) || (locked && !(T && (Object.hasOwn(forced, fname) || matchField(fname, f, idx)[0])))) {
       fields.push({ from: fname, drop: true, note: SF_SYSTEM.has(fname) ? 'Salesforce system field' : 'not createable in Salesforce' })
@@ -871,18 +864,6 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     }
   }
 
-  // A field this instance's own trigger writes (rust/aspen.server.json, and `record.set` in its
-  // Rust code): a loaded value would fight the trigger, or be overwritten by it.
-  const owned = T ? triggerWrites(ws.triggers ??= declaredTriggers(ws.root), tgt, target) : new Map()
-  for (const [tname, trigger] of owned) {
-    const why = `the ${trigger} trigger writes ${tname}; a loaded value would fight it`
-    const source = rows.find((r) => r.target === tname && r.source)?.source // an expr (a percent as a fraction) has no "from"
-    fields.forEach((x, i) => { if (x.target === tname && !x.drop) fields[i] = { ...(x.from ?? source ? { from: x.from ?? source } : {}), drop: true, note: why } })
-    for (const x of fields) if (x.objectOf === tname) Object.assign(x, { drop: true, note: why })
-    const row = rows.find((r) => r.target === tname)
-    if (row) Object.assign(row, { decision: 'drop', confidence: 'GAP', gap: 'written by a trigger', note: why })
-  }
-
   // What the CRM triggers enforce that the describe does not declare (migrate.mjs TARGET_RULES).
   const rules = T ? TARGET_RULES[target] ?? {} : {}
   for (const [tname, why] of Object.entries(rules.setOnInsert ?? {})) {
@@ -904,7 +885,7 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
 
   if (T) {
     for (const [fname, tf] of Object.entries(T.fields)) {
-      if (tf.required && !owned.has(fname) && !fields.some((e) => e.target === fname && !e.drop)) {
+      if (tf.required && !fields.some((e) => e.target === fname && !e.drop)) {
         // Salesforce computes some of what Aspen requires (a contact's Name): its value is data.
         const same = Object.keys(S.fields).find((n) => !SF_SYSTEM.has(n) && normalize(n) === bare(fname))
         if (same) {
@@ -1334,7 +1315,7 @@ function main (argv) {
 
   if (cmd === 'preflight') {
     // Each object's fullest source row is its test row's values: real data finds the rules made-up
-    // data passes (a username outside the instance's domain). migrate.mjs writes and deletes it.
+    // data passes. migrate.mjs writes and deletes it.
     const src = schema(ws, 'source')
     const x = exportOf(m)
     const sample = {}

@@ -315,7 +315,7 @@ test('what the user must hear: addresses are records, derived objects are not lo
   assert.match(gaps, /\*\*Note:\*\* lead_p is/)
 })
 
-// ---- a Salesforce export on disk, as export_g17.py writes it
+// ---- a Salesforce export on disk: a manifest, a describe per object and one CSV per object
 
 const rawField = (name, type, o = {}) => ({
   name, label: o.label ?? name, type, nillable: true, defaultedOnCreate: false, createable: o.createable ?? true, unique: false,
@@ -454,47 +454,34 @@ test('draft drafts again an object that had no target, once the target has one',
   assert.equal(m.objects[0].target, 'product_p')
 })
 
-// ---- line items, per-parent picklists, triggers, preflight
+// ---- matching rules, per-parent picklists, preflight
 
-const QUOTING = structuredClone(SOURCE)
-Object.assign(QUOTING.objects, {
-  OpportunityLineItem: sfObject('Opportunity Product', {
-    OpportunityId: ref('Opportunity ID', 'Opportunity'), Product2Id: ref('Product ID', 'Product2'), PricebookEntryId: ref('Price Book Entry ID', 'PricebookEntry'),
-    UnitPrice: sfField('Sales Price', 'currency', { aspen: 'currency' }), TotalPrice: sfField('Total Price', 'currency', { aspen: 'currency' })
-  }),
-  Pricebook2: sfObject('Price Book', { Name: str('Price Book Name') }),
-  PricebookEntry: sfObject('Price Book Entry', { Pricebook2Id: ref('Price Book ID', 'Pricebook2'), Product2Id: ref('Product ID', 'Product2') }),
-  // A team member on an account or a deal, in one object: one role list, two parents.
-  Deal_Team__c: sfObject('Deal Team', { WhatId: ref('Related To ID', 'Account', 'Opportunity'), Role__c: pick('Role', 'Deal_Team__c.Role__c') })
+// A custom team object: a member on an account or a deal, one role list for both parents; and a
+// lookup named <Object>Id, with a digit, that only the Id-stripping rule reaches.
+const TEAMS = structuredClone(SOURCE)
+Object.assign(TEAMS.objects, {
+  Deal_Team__c: sfObject('Deal Team', { WhatId: ref('Related To ID', 'Account', 'Opportunity'), Role__c: pick('Role', 'Deal_Team__c.Role__c') }),
+  Kit__c: sfObject('Kit', { Name: str('Name'), Product2Id: ref('Product', 'Product2'), Product_Id__c: str('Product ID (text)'), Case_Id__c: ref('Case', 'Case'), Code__c: { ...str('Code'), sf: { ...str('Code').sf, createable: false } } })
 })
-QUOTING.picklists['Deal_Team__c.Role__c'] = ['Account Manager', 'Sales Rep']
-const QUOTED = structuredClone(TARGET)
-Object.assign(QUOTED.objects, {
-  opportunity_line_p: object('Opportunity Line', {
-    opportunity_p: id('Opportunity', 'opportunity_p', { required: true }), product_p: id('Product', 'product_p'), pbe_p: id('Price Book Entry', 'pricebook_entry_p'),
-    price_p: field('Price', 'currency', 'currency'), line_total_p: field('Line Total', 'currency', 'currency'), ccode_p: id('Currency', 'currency_p')
-  }),
-  pricebook_p: object('Price Book', { name_p: text('Name') }),
-  pricebook_entry_p: object('Price Book Entry', { pricebook_p: id('Price Book', 'pricebook_p'), product_p: id('Product', 'product_p') })
-})
-QUOTED.objects.team_role_p.label = 'Deal Team' // reached by its label, as a custom object would be
-QUOTED.picklistsByParent = { 'team_role_p.role_p': { picklist: 'team_role_p', dependsOn: 'whaton_p', values: { account_p: ['account_manager_p'], opportunity_p: ['sales_rep_p'] } } }
+TEAMS.picklists['Deal_Team__c.Role__c'] = ['Account Manager', 'Sales Rep']
+const TEAMED = structuredClone(TARGET)
+TEAMED.objects.team_role_p.label = 'Deal Team' // reached by its label, as a custom object would be
+TEAMED.objects.kit_c = object('Kit', { name_c: text('Name'), product_c: id('Product', 'product_p'), case_c: id('Case', 'case_p'), code_c: text('Code') })
+TEAMED.picklistsByParent = { 'team_role_p.role_p': { picklist: 'team_role_p', dependsOn: 'whaton_p', values: { account_p: ['account_manager_p'], opportunity_p: ['sales_rep_p'] } } }
 
-test('line items and price books reach their Aspen objects, and a lookup named <Object>Id its <object>_p', t => {
-  const { entry } = draft(t, `${CORE},OpportunityLineItem,Product2,Pricebook2,PricebookEntry`, QUOTING, { target: QUOTED })
-  const line = entry('OpportunityLineItem')
-  assert.equal(line.target, 'opportunity_line_p')
-  assert.equal(entry('Pricebook2').target, 'pricebook_p')
-  assert.deepEqual(to(line, 'opportunity_p'), { target: 'opportunity_p', from: 'OpportunityId', lookup: 'Opportunity' })
-  assert.equal(to(line, 'product_p').lookup, 'Product2')
-  assert.equal(to(line, 'pbe_p').lookup, 'PricebookEntry')
-  assert.equal(to(line, 'price_p').from, 'UnitPrice')
-  assert.equal(to(line, 'line_total_p').from, 'TotalPrice')
-  assert.equal(to(entry('PricebookEntry'), 'pricebook_p').lookup, 'Pricebook2')
+test('a lookup named <Object>Id reaches <object>, a field the exporting user may not create still maps, and one target takes one field', t => {
+  const { entry } = draft(t, `${CORE},Product2,Kit__c`, TEAMS, { target: TEAMED })
+  const kit = entry('Kit__c')
+  assert.equal(kit.target, 'kit_c')
+  assert.deepEqual(to(kit, 'product_c'), { target: 'product_c', from: 'Product2Id', lookup: 'Product2', missing: 'null' })
+  assert.equal(to(kit, 'case_c').from, 'Case_Id__c')
+  assert.equal(to(kit, 'code_c').from, 'Code__c', 'not createable for the exporting user, but it holds data')
+  assert.equal(from(kit, 'Product_Id__c').drop, true)
+  assert.match(from(kit, 'Product_Id__c').note, /product_c already takes Product2Id/)
 })
 
 test('an object-dependent picklist on a row that can point at two objects gets one map, and one todo, per object', t => {
-  const { entry, gaps } = draft(t, `${CORE},Deal_Team__c`, QUOTING, { target: QUOTED })
+  const { entry, gaps } = draft(t, `${CORE},Deal_Team__c`, TEAMS, { target: TEAMED })
   const role = to(entry('Deal_Team__c'), 'role_p')
   assert.equal(role.map, undefined)
   assert.deepEqual(role.byParent.account_p.map, { 'Account Manager': 'account_manager_p' })
@@ -503,19 +490,6 @@ test('an object-dependent picklist on a row that can point at two objects gets o
   assert.match(role.byParent.opportunity_p.todo, /allows on opportunity_p: Account Manager\./)
   assert.match(gaps, /`Role__c`[^\n]*allows on account_p/)
   assert.match(gaps, /`Role__c`[^\n]*allows on opportunity_p/)
-})
-
-test("draft leaves out a field this instance's trigger writes, naming the trigger", t => {
-  const files = {
-    'rust/aspen.server.json': JSON.stringify({ 'record-triggers': [{ name: 'won_c', object: 'opportunity_p', events: ['before_update'] }] }),
-    'rust/src/lib.rs': 'impl won_c for Entrypoints {\n  fn before_update(context: &BeforeUpdateContext) -> error::Result<()> { won::before_half(context.batch()) }\n}\n',
-    'rust/src/won.rs': 'pub fn before_half(batch: &MutableBatch) -> error::Result<()> { for r in batch.iter() { r.set("probability_p", FieldState::Absent); } Ok(()) }\n'
-  }
-  const { entry, gaps } = draft(t, CORE, SOURCE, { files })
-  const prob = from(entry('Opportunity'), 'Probability')
-  assert.equal(prob.drop, true)
-  assert.match(prob.note, /the won_c trigger writes probability_p/)
-  assert.match(gaps, /written by a trigger/)
 })
 
 test('preflight takes each object\'s fullest source row as its test values, then hands the write to migrate.mjs', t => {
