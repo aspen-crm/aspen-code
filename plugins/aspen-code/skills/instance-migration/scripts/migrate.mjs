@@ -526,7 +526,10 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
         const r = refs[`${e.lookup.object}.${e.lookup.match}`]
         const key = e.lookup.by === 'value' ? v : r.source?.[v]
         const id = key == null ? undefined : r.target.get(key)
-        if (id) { points[e.target] = e.lookup.object; v = id } else if (e.missing === 'null') v = null
+        if (id === AMBIGUOUS) {
+          if (e.missing === 'null') { v = null; changed.push({ field: e.target, kind: `blank: more than one ${e.lookup.object} has that ${e.lookup.match}` }) }
+          else { err(e.target, 'more than one match on the target', `${e.lookup.object} records share ${e.lookup.match} = ${key}`); continue }
+        } else if (id) { points[e.target] = e.lookup.object; v = id } else if (e.missing === 'null') v = null
         else { err(e.target, 'no match on the target', `no ${e.lookup.object} with ${e.lookup.match} = ${key ?? '(blank)'}`); continue }
       } else {
         const objs = lookupObjects(e)
@@ -588,9 +591,12 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
 
 // ---- load
 
+// A value two records share names neither (user_p.email_p is not unique): it resolves to
+// AMBIGUOUS, never to whichever record the query returned first.
+const AMBIGUOUS = Symbol('ambiguous')
 async function indexBy (api, object, field) {
   const map = new Map()
-  for await (const r of pageAll(api.query, { object, select: `id_p, ct_p, ${field}` })) if (r[field] != null && !map.has(r[field])) map.set(r[field], r.id_p)
+  for await (const r of pageAll(api.query, { object, select: `id_p, ct_p, ${field}` })) if (r[field] != null) map.set(r[field], map.has(r[field]) ? AMBIGUOUS : r.id_p)
   return map
 }
 

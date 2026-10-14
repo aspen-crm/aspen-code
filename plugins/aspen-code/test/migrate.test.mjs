@@ -611,6 +611,17 @@ test('a match lookup finds records the same run loaded, and can match on the val
   assert.ok(!existsSync(join(s.ws, 'extract', 'match', 'account_p.name_p.json')), 'a value match needs no source map')
 })
 
+test('an email two target users share matches neither: the owner is left blank and counted', async t => {
+  const target = targetRecords()
+  target.user_p.push({ id_p: 't2', ct_p: '2025-01-01T00:00:01.000Z', email_p: 'a@x.com' })
+  const s = await setup(t, { target })
+  await s.ready()
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.equal(byName(s.tgt, 'account_p', 'name_p', 'Acme').owner_p ?? null, null, 'never whichever user the query returned first')
+  assert.match(readFileSync(join(s.ws, 'reports', 'load.md'), 'utf8'), /\| company_c \| owner_p \| blank: more than one user_p has that email_p \| 1 \|/)
+})
+
 test('--then runs the next steps on the same sign-in, and stops at the first that fails', async t => {
   const s = await setup(t)
   // A failing dry run stops the chain: verify does not run.

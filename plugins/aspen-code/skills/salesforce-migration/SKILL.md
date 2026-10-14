@@ -80,6 +80,23 @@ Then write `mapping.json` from their answers, all at once. Never settle a todo, 
 proposal, without the user's answer. Don't ask about empty or Salesforce-owned fields, and ask
 about a key only if the target may already hold these records.
 
+## People: users, team members, contacts
+
+A Salesforce `User` is two things in Aspen, and a customer is a third. Which one a field takes is
+its lookup in `schema/target.json`, never the Salesforce side, where both are `User`:
+
+| Aspen | Is | Takes |
+|---|---|---|
+| `team_p` | A person in the company (employee, contractor, partner). `team_p.user_p` is their login, if they have one, linked by email | An account's `OwnerId`; `AccountTeamMember`/`OpportunityTeamMember` (`team_role_p`); an activity's own owner row (`who_p`) |
+| `user_p` | A login: username and email | `OwnerId` on an opportunity, case, lead, task or event (`owner_p` takes only `user_p`) |
+| `contact_p` | A person outside the company | `Contact`, and a `WhoId` or `ContactId` that names one. Never a User, even with the same email |
+
+- Owners are matched by email, not migrated. A Salesforce user with no matching team member or
+  user on the target leaves the owner blank. Migrate `User` only to create team members missing on
+  the target; it never creates logins.
+- `team_p.email_p` is unique; `user_p.email_p` is not (`username_p` is). An email two target users
+  share matches neither, and the dry run counts it under **Changed on the way in**.
+
 ## What draft decides on its own
 
 Drop is the proposal for anything the target cannot carry, because a new Aspen field can't be
@@ -91,7 +108,7 @@ deleted yet. Only a field that **matched a target field and still does not fit**
 | A field whose name or label matches a target field | Mapped, `exact`. |
 | A field matched through the synonym table (`Description` → `about_p`) | Mapped, `close`, with `matched by synonym` in the report. |
 | A lookup to an object in the same migration | `"lookup": "<SFDC object>"`, resolved through the id map. |
-| A Salesforce reference onto an Aspen polyid (`customer_p`, `what_p`, `who_p`, `owner_p`) | The id through the id map, or a User by email, with the companion (`whaton_p`…) as `"objectOf"`. The objects it may hold come from the target's `allowed-objects`/`included-polyids`; a row pointing at one it can't hold (a Lead in `who_p`) carries blank. Nothing it points at can land (no user with a unique email): dropped. `Opportunity.AccountId` is `customer_p`. |
+| A Salesforce reference onto an Aspen polyid (`customer_p`, `what_p`, `who_p`, `owner_p`) | The id through the id map, or a User by email, with the companion (`whaton_p`…) as `"objectOf"`. The objects it may hold come from the target's `allowed-objects`/`included-polyids`; a row pointing at one it can't hold (a Lead in `who_p`) carries blank. Nothing it points at can land (no user or team member to match by email): dropped. `Opportunity.AccountId` is `customer_p`. |
 | `AccountContactRelation`, `OpportunityContactRole`, `CaseContactRole` | `contact_role_p`, never `contact_rel_p` (a team member's relationship strength with a contact). The parent fills `what_p`, `Roles`/`Role` is proposed for `role_p`. Keyed on `contact_role_chk_p` over `contact_p` and `what_p`, so a role Aspen's triggers already derived (a primary account or contact, an opportunity's customer, a case's contact) is matched, not inserted twice. `AccountContactRelation` extracts only `IsDirect = false`. |
 | `AccountTeamMember`, `OpportunityTeamMember`, `CaseTeamMember` | `team_role_p`: the User matched to `team_p` by email, the parent in `what_p`, keyed on `team_role_chk_p` (the owner's row is already derived). `CaseTeamMember` extracts only users; a case's contacts are `CaseContactRole`. |
 | `Task`, `Event` and `TaskRelation`, `EventRelation` | `task_p`/`meeting_p`. The activity's own row names its owner in `who_p` (a team member) and is not given `WhoId`; each contact in its relation is a child row (`parent_p`), copying the subject, start and due date it must carry. Users and leads in a relation are not carried. Migrate the relations with their activity. |
@@ -105,7 +122,7 @@ deleted yet. Only a field that **matched a target field and still does not fit**
 | An object Aspen derives (`contact_owner_p`, `contact_channel_p`, `contact_merge_p`, `miner_*`) | A todo: don't load it. |
 | An object with no Aspen counterpart | A todo: skip it unless the user names a use (step 2). |
 | `Lead` | `lead_p`, with a note: it is an early deal, not an unqualified person, and its trigger creates a contact for each lead it can't match. Migrate Contact and Account first. |
-| `OwnerId` and any lookup to `User` | Matched by email to whichever object the target field looks up (`user_p` on one instance, `team_p` on another), blank when there is no match. |
+| `OwnerId` and any lookup to `User` | Matched by email to whichever object the target field looks up ([People](#people-users-team-members-contacts)), blank when there is no match. |
 | A field nothing on the target matches | Dropped, and listed in the report under **holds data** or **empty in the sample**. |
 | A formula or roll-up field | A gap: Aspen has no computed-field type. Its value can be extracted as data, or the rule moves to a Rust trigger (`server-code`). |
 | A multi-select picklist | A gap: Aspen picklists hold one value. |

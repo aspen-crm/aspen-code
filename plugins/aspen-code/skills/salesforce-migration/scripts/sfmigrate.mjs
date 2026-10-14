@@ -575,18 +575,24 @@ function targetIndex (T) {
   return { byName, byLabel }
 }
 
-// Which object a Salesforce User lookup lands on differs by instance (user_p on one, team_p on
-// another), and so does the field that identifies the same person on both sides. Read both off
-// the target schema: a hardcoded email_p fails at load on any instance that does not have one.
+// Which object a Salesforce User lookup lands on differs by field (owner_p is team_p on account_p
+// and contact_p, user_p on opportunity_p, case_p, lead_p and the activities), and so does the
+// field that identifies the same person on both sides. Read both off the target schema: a
+// hardcoded email_p fails at load on any instance that does not have one. user_p.email_p is not
+// unique (username_p is), so an email field is taken unique or not; load leaves blank an email
+// two target records share.
 function userMatch (tgt, objectName) {
   const O = objectName ? tgt.objects[objectName] : null
   if (!O) return null
   const entries = Object.entries(O.fields)
   const pick = entries.find(([, f]) => f.unique && f.subtype === 'email') ??
     entries.find(([, f]) => f.unique && /e-?mail/i.test(f.label ?? '')) ??
-    entries.find(([n, f]) => f.unique && /email/i.test(n))
+    entries.find(([n, f]) => f.unique && /email/i.test(n)) ??
+    entries.find(([, f]) => f.subtype === 'email')
   return pick ? { object: objectName, match: pick[0] } : null
 }
+
+const shared = (tgt, on) => tgt.objects[on.object]?.fields[on.match]?.unique ? '' : `; ${on.object}.${on.match} is not unique, so an email two of them share is left blank too`
 
 function matchField (fname, f, idx) {
   const n = normalize(fname)
@@ -709,11 +715,11 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
           e.sfMatch = { object: 'User', field: 'Email' }
           e.missing = 'null'
           row.confidence = 'close'; row.gap = 'user lookup'
-          row.note = `matched to ${on.object}.${on.match} by email; blank when that person has no record on the target`
+          row.note = `matched to ${on.object}.${on.match} by email; blank when that person has no record on the target${shared(tgt, on)}`
         } else {
           row.gap = 'user lookup'; row.decision = 'todo'
           row.note = tf.lookup
-            ? `${tf.lookup} has no unique email field to join on: name the field that identifies the same person on both sides`
+            ? `${tf.lookup} has no email field to join on: name the field that identifies the same person on both sides`
             : `${tname} does not name the object it points to`
           e.todo = `${fname} points to a Salesforce User and ${tname} looks up ${tf.lookup ?? 'an object the schema does not name'}: say which field identifies the same person on both sides ({"lookup": {"object": "${tf.lookup ?? '<object>'}", "match": "<field>"}, "sfMatch": {"object": "User", "field": "Email"}}), or drop it`
         }
@@ -921,11 +927,11 @@ function polyMapping (ws, src, tgt, target, tname, fname, f, migrating) {
   if (user) {
     return {
       fields: [{ target: tname, from: fname, lookup: user, sfMatch: { object: 'User', field: 'Email' }, missing: 'null' }, { target: on, objectOf: tname }],
-      row: { target: tname, confidence: 'close', gap: 'user lookup', decision: 'map', note: `matched to ${user.object}.${user.match} by email, blank when that person has no record on the target; ${on} follows${after}` }
+      row: { target: tname, confidence: 'close', gap: 'user lookup', decision: 'map', note: `matched to ${user.object}.${user.match} by email, blank when that person has no record on the target${shared(tgt, user)}; ${on} follows${after}` }
     }
   }
   if (!carried.length && !waiting.length) {
-    const why = `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}${f.sf.referenceTo.includes('User') ? ' (matched by a unique email, which none of them has)' : ''}: nothing it points at can go here`
+    const why = `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}${f.sf.referenceTo.includes('User') ? ' (matched by email, which none of them has)' : ''}: nothing it points at can go here`
     return { fields: [{ from: fname, drop: true, note: why }], row: { target: tname, gap: 'nothing to point at', decision: 'drop', note: why } }
   }
   if (!carried.length) return todo('lookup not migrating', `${fname} points to ${f.sf.referenceTo.join(', ')}, and ${tname} holds ${holds}: migrate ${waiting.join(' or ')} too, or drop it`)
