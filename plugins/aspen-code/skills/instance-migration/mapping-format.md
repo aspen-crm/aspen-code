@@ -19,7 +19,7 @@ left.
         { "target": "name_p", "from": "name_c" },
         { "target": "industry_p", "from": "sector_c", "map": { "tech_c": "technology_p", "bank_c": "financial_services_p" }, "default": null, "note": "user: anything else stays blank" },
         { "target": "parent_account_p", "from": "parent_c", "lookup": "company_c" },
-        { "target": "owner_p", "from": "owner_p", "lookup": { "object": "user_p", "match": "email_p" } },
+        { "target": "owner_p", "from": "owner_p", "lookup": { "object": "team_p", "match": "email_p" } },
         { "target": "ccode_p", "from": "ccode_p", "lookup": { "object": "currency_p", "match": "currency_code_p" } },
         { "from": "legacy_score_c", "drop": true, "note": "user: not needed" }
       ]

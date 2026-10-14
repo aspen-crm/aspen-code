@@ -27,7 +27,7 @@ delta: what `source` means, the two Salesforce-only keys, and what `draft` puts 
         { "target": "name_p", "from": "Name" },
         { "target": "about_p", "from": "Description", "note": "user: keep the SFDC description" },
         { "target": "parent_account_p", "from": "ParentId", "lookup": "Account" },
-        { "target": "owner_p", "from": "OwnerId", "lookup": { "object": "user_p", "match": "email_p" }, "sfMatch": { "object": "User", "field": "Email" }, "missing": "null" },
+        { "target": "owner_p", "from": "OwnerId", "lookup": { "object": "team_p", "match": "email_p" }, "sfMatch": { "object": "User", "field": "Email" }, "missing": "null" },
         { "target": "industry_p", "from": "Industry", "map": { "Biotechnology": "biotech_p" }, "default": null, "note": "user: anything else stays blank" },
         { "target": "score_p", "from": "Health_Score__c", "note": "user: keep the formula's value as data" },
         { "from": "Territories__c", "drop": true, "note": "user: multi-select, not needed" }
