@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
+import { keepFresh, pageAll } from '../skills/instance-migration/scripts/migrate.mjs'
 import { session, signIn, signOut, socketFor } from '../skills/instance-migration/scripts/signin.mjs'
 
 const plugin = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -34,7 +34,7 @@ const date = (name) => ({ name, type: 'date', subtype: 'date' })
 const datetime = (name) => ({ name, type: 'datetime', subtype: 'datetime' })
 const SYSTEM = [{ name: 'id_p', type: 'id', subtype: 'id' }, datetime('ct_p'), datetime('mt_p'), lookup('cb_p', 'user_p'), lookup('mb_p', 'user_p')]
 
-async function mockInstance ({ base, objects, picklists, records, failCreate = () => false, warnCreate = () => false, expireAfter = Infinity, api = PINNED_API }) {
+async function mockInstance ({ base, objects, picklists, records, failCreate = () => false, warnCreate = () => false, expireAfter = Infinity, api = PINNED_API, rules = () => null, stored = () => {} }) {
   const calls = []
   const issued = [] // every code and token handed out, to prove none leaks
   const codes = new Map()
@@ -151,6 +151,16 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
       return send(200, { status: 'SUCCESS', overview: { size: out.length }, data: out })
     }
     const w = /^\/data\/(\w+)$/.exec(route)
+    if (w && req.method === 'DELETE') {
+      const list = records[w[1]] ?? []
+      const data = body.data.map(({ id_p: id }) => {
+        const at = list.findIndex(r => r.id_p === id)
+        if (at < 0) return { status: 'FAILURE', failures: [{ error_type: 'INVALID_DATA', detail: 'no such record', display_detail: 'no such record' }] }
+        list.splice(at, 1)
+        return { status: 'SUCCESS', id }
+      })
+      return send(200, { status: data.every(d => d.status === 'SUCCESS') ? 'SUCCESS' : 'FAILURE', data })
+    }
     if (w && (req.method === 'POST' || req.method === 'PATCH')) {
       const obj = w[1]
       if (!objects[obj]) return fail(`unknown object ${obj}`, 404)
@@ -174,10 +184,14 @@ async function mockInstance ({ base, objects, picklists, records, failCreate = (
           if (f.type === 'id' && f.relationship && !(records[f.relationship] ?? []).some(r => r.id_p === v)) return rowFail(`${k}: no such ${f.relationship}`)
         }
         const merged = { ...(existing ?? {}), ...row }
+        // Rules the describe does not declare: a failure scoped to a field (context.field_name) or not.
+        const undeclared = req.method === 'POST' ? rules(obj, merged) : null
+        if (undeclared) return { status: 'FAILURE', failures: [{ error_type: 'INVALID_DATA', detail: undeclared.detail, display_detail: undeclared.detail, ...(undeclared.field ? { context: { field_name: undeclared.field } } : {}) }] }
         for (const f of objects[obj]) if (f.required && merged[f.name] == null) return rowFail(`${f.name} is required`)
         for (const f of objects[obj]) if (f.unique && merged[f.name] != null && (records[obj] ?? []).some(r => r !== existing && r[f.name] === merged[f.name])) return rowFail(`${f.name} must be unique`)
         if (existing) { Object.assign(existing, row); return { status: 'SUCCESS', id: existing.id_p } }
-        const rec = { ...row, id_p: randomUUID(), ct_p: new Date(clock += 1000).toISOString() };
+        const rec = { ...row, id_p: randomUUID(), ct_p: new Date(clock += 1000).toISOString() }
+        stored(obj, rec);
         (records[obj] ??= []).push(rec)
         // A row applied with a warning: written, and reported as WARNING rather than SUCCESS.
         if (warnCreate(obj)) return { status: 'WARNING', id: rec.id_p, warnings: [{ error_type: 'INVALID_DATA', detail: 'applied with a warning', display_detail: '' }] }
@@ -279,10 +293,10 @@ function browser (home) {
   return bin
 }
 
-async function setup (t, { target = targetRecords(), failCreate, warnCreate, expireAfter, api, migrate = script } = {}) {
+async function setup (t, { target = targetRecords(), failCreate, warnCreate, expireAfter, api, migrate = script, rules, stored } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'aspen migrate '))
   const src = await mockInstance({ base: '/acme/legacy', objects: SOURCE_OBJECTS, picklists: { sector_c: ['tech_c', 'bank_c', 'farm_c'], stage_c: ['a_c', 'b_c', 'x_c'] }, records: sourceRecords(), api })
-  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], currency_code_p: ['usd_p', 'eur_p'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api })
+  const tgt = await mockInstance({ base: '/acme/prod', objects: TARGET_OBJECTS, picklists: { industry_p: ['technology_p', 'financial_services_p', 'other_p'], stage_c: ['a_c', 'b_c'], currency_code_p: ['usd_p', 'eur_p'], role_p: [{ name: 'champion_p', label: 'Champion', 'parent-objects': ['account_p'] }, { name: 'sponsor_p', label: 'Sponsor', 'parent-objects': ['task_p'] }] }, records: target, failCreate: (o) => failCreate?.(o) ?? false, warnCreate: (o) => warnCreate?.(o) ?? false, expireAfter, api, rules, stored })
   t.after(async () => { await Promise.all([signOut(src.url), signOut(tgt.url)]); src.close(); tgt.close(); rmSync(home, { recursive: true, force: true }) })
   const dir = join(home, 'acme_prod')
   mkdirSync(join(dir, '.aspen'), { recursive: true })
@@ -870,4 +884,135 @@ test('no token is written into the workspace, and every refresh token is revoked
   for (const file of walk(kept)) assert.ok(statSync(file).isSocket(), `${file} is not a socket`)
   assert.equal((await s.run('signout', s.ws)).status, 0)
   assert.equal(s.src.live.size + s.tgt.live.size, 0, 'a refresh token was left unrevoked')
+})
+
+// ---- accept, the pilot, triggers and per-parent maps
+
+// person_c p3 has no last name: with last_name_p mapped straight, that row fails as "required".
+const STRICT = () => { const o = structuredClone(SETTLED); o[0].fields[1] = { target: 'last_name_p', from: 'last_c' }; return o }
+
+test('a pilot whose every failure the mapping accepts exits 0, and the chain runs through verify', async t => {
+  const s = await setup(t)
+  await s.ready(STRICT())
+  const strict = await s.run('load', s.ws, '--run', '--limit', '1')
+  assert.equal(strict.status, 1, 'a failure nobody accepted stops the chain')
+  writeFileSync(join(s.ws, 'mapping.json'), JSON.stringify({ ...s.mapping(), accept: [{ object: 'person_c', field: 'last_name_p', problem: 'requ*', note: 'user: contacts without a last name stay behind' }] }))
+  const r = await s.run('load', s.ws, '--run', '--limit', '1', '--then', 'load', '--run', '--then', 'verify')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /1 failed \(1 as mapping\.json accepts\)/)
+  assert.match(r.stdout, /0 not loaded, 1 left out as mapping\.json accepts/)
+  const report = readFileSync(join(s.ws, 'reports', 'load.md'), 'utf8')
+  assert.match(report, /## Accepted failures[\s\S]*\| person_c \| last_name_p \| required \| 1 \|/)
+  assert.doesNotMatch(report, /## Errors/)
+  assert.equal(s.tgt.records.contact_p.length, 2)
+})
+
+test('an accept entry past its max accepts nothing, and the run fails', async t => {
+  const s = await setup(t)
+  await s.ready(STRICT())
+  writeFileSync(join(s.ws, 'mapping.json'), JSON.stringify({ ...s.mapping(), accept: [{ object: 'person_c', field: 'last_name_p', problem: 'required', max: 0 }] }))
+  const r = await s.run('load', s.ws)
+  assert.equal(r.status, 1)
+  assert.match(readFileSync(join(s.ws, 'reports', 'plan.md'), 'utf8'), /past their max[\s\S]*1 rows, max 0/)
+  writeFileSync(join(s.ws, 'mapping.json'), JSON.stringify({ ...s.mapping(), accept: [{ object: 'nobody_c', field: 'x', problem: 'y' }] }))
+  const bad = await s.run('load', s.ws)
+  assert.equal(bad.status, 2)
+  assert.match(bad.stderr, /accept names nobody_c/)
+})
+
+test('a pilot loads whole an object other entries match by a field, so their rows find it', async t => {
+  const s = await setup(t)
+  const objects = structuredClone(SETTLED)
+  objects.push({ source: 'user_p', target: 'user_p', key: 'email_p', onMatch: 'skip', fields: [{ target: 'email_p', from: 'email_p' }] })
+  await s.ready(objects)
+  const r = await s.run('load', s.ws, '--run', '--limit', '0')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.ok(byName(s.tgt, 'user_p', 'email_p', 'b@x.com'), 'the user held back by --limit 0 loaded anyway')
+  assert.equal((s.tgt.records.account_p ?? []).length, 0, 'every other object kept the limit')
+  assert.match(readFileSync(join(s.ws, 'reports', 'load.md'), 'utf8'), /Loaded whole in this pilot.*user_p → user_p/)
+})
+
+test('byParent maps an object-dependent picklist by the object the row points at', async t => {
+  const s = await setup(t)
+  s.src.records.role_c.push({ id_p: 'r3', ct_p: '2023-01-01T00:00:02.000Z', person_c: 'p3', company_c: null })
+  const roles = (byParent) => [...SETTLED, { source: 'role_c', target: 'contact_role_p', fields: [
+    { target: 'contact_p', from: 'person_c', lookup: 'person_c' },
+    { target: 'what_p', expr: 'r.company_c ?? r.person_c', lookup: ['company_c', 'person_c'] },
+    { target: 'whaton_p', objectOf: 'what_p' },
+    { target: 'role_p', expr: "'Champion'", byParent }
+  ] }]
+  await s.ready(roles({ account_p: { map: {}, todo: 'Champion is not among those role_p allows on account_p' } }))
+  const held = await s.run('load', s.ws)
+  assert.equal(held.status, 2)
+  assert.match(held.stderr, /role_c\.role_p on account_p: Champion is not among/)
+  s.settle(roles({ account_p: { map: { Champion: 'champion_p' } } }))
+  const dry = await s.run('load', s.ws)
+  assert.equal(dry.status, 1)
+  const plan = readFileSync(join(s.ws, 'reports', 'plan.md'), 'utf8')
+  assert.match(plan, /\| role_c \| role_p \| no map for that parent object \| 1 \|/, 'r3 points at a contact, which byParent has no map for')
+  const r = await s.run('load', s.ws, '--run')
+  assert.equal(r.status, 1)
+  const acme = byName(s.tgt, 'account_p', 'name_p', 'Acme')
+  assert.equal(s.tgt.records.contact_role_p.find(x => x.what_p === acme.id_p).role_p, 'champion_p')
+})
+
+test('a long command touches its kept sign-in on a timer and renews the token before the next request', async () => {
+  const calls = { bearer: 0, refreshed: 0 }
+  const fake = { bearer: async () => { calls.bearer++; return 't' }, refreshed: async () => { calls.refreshed++; return 't' } }
+  const fresh = keepFresh(fake, 40)
+  await fresh.due()
+  assert.equal(calls.refreshed, 0, 'not due yet')
+  await new Promise(resolve => setTimeout(resolve, 130))
+  assert.ok(calls.bearer >= 2, 'the timer touched the sign-in')
+  await fresh.due()
+  await fresh.due()
+  assert.equal(calls.refreshed, 1, 'renewed once, then not again until the next interval')
+  fresh.stop()
+})
+
+// ---- preflight
+
+test('preflight writes one test row per object, finds what the describe does not declare, and deletes every row', async t => {
+  const s = await setup(t, {
+    rules: (obj, row) => {
+      if (obj === 'user_p') return { detail: 'No free user licenses are left on this instance.' }
+      if (obj === 'contact_p' && row.phone_p == null) return { field: 'phone_p', detail: 'A contact needs a phone number.' }
+      if (obj === 'account_p' && row.description_p != null) return { detail: 'You do not have permissions to create record with system fields.' }
+      return null
+    },
+    stored: (obj, rec) => {
+      if (obj === 'contact_p') { if (rec.last_met_c) rec.last_met_c = rec.last_met_c.replace(/\.\d{3}Z$/, '.000Z'); rec.bio_p ??= 'auto' }
+    }
+  })
+  const objects = structuredClone(SETTLED)
+  objects.push({ source: 'user_p', target: 'user_p', key: 'email_p', fields: [{ target: 'email_p', from: 'email_p' }] })
+  await s.ready(objects)
+  const before = writes(s.tgt).length
+  const dry = await s.run('preflight', s.ws)
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr)
+  assert.match(dry.stdout, /person_c → contact_p: a test row of \d+ fields/)
+  assert.match(dry.stdout, /nothing written/)
+  assert.equal(writes(s.tgt).length, before, 'without --run nothing is written')
+  assert.equal((await s.run('preflight', s.ws, '--run', '--then', 'load')).status, 2, 'preflight is never chained')
+
+  const r = await s.run('preflight', s.ws, '--run')
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  const pf = JSON.parse(readFileSync(join(s.ws, 'schema', 'preflight.json'), 'utf8'))
+  const person = pf.objects.person_c
+  assert.equal(person.requiredUndeclared.phone_p, 'A contact needs a phone number.')
+  assert.ok(person.coercions.last_met_c, 'stored to the second, not the millisecond')
+  assert.equal(person.serverSet.bio_p, 'auto')
+  assert.equal(person.row.first_name_p, 'Ada', 'the test row carries a real value from the extract')
+  assert.match(person.row.email_p, /^preflight\.\w+\.ada@x\.com$/, 'a unique email is made unique and keeps its domain')
+  assert.equal(pf.objects.company_c.rejected.description_p.finding, 'set by the server', 'a refusal for no field is narrowed to the field')
+  assert.match(pf.objects.user_p.objectRejected.message, /No free user licenses/)
+  for (const o of Object.values(pf.objects)) assert.equal(o.written, o.deleted, `${o.target}: every test row written was deleted`)
+  assert.deepEqual(s.tgt.records.contact_p ?? [], [])
+  assert.deepEqual(s.tgt.records.account_p ?? [], [])
+  const report = readFileSync(join(s.ws, 'reports', 'preflight.md'), 'utf8')
+  assert.match(report, /\| phone_p \| required, not declared \| A contact needs a phone number\. \|/)
+  assert.match(report, /\| description_p \| set by the server \|.*drop it from the mapping/)
+  assert.match(report, /\| \(object\) \| refused whatever the row holds \| No free user licenses/)
+  assert.match(report, /\| last_met_c \| stored differently than sent \| sent `2024-05-06T07:08:09\.100Z`, stored `2024-05-06T07:08:09\.000Z`/)
+  assert.doesNotMatch(report, /ada@x\.com/, 'source values stay out of the committed report')
 })

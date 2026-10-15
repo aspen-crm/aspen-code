@@ -18,10 +18,11 @@ The script uses the REST API; the CLI has no data commands. There is no upsert a
 set, so every target record gets a new id; the workspace's id map connects the two and makes a
 re-run skip what already loaded. Don't add a legacy-id field for it.
 
-This skill never deletes. Records can be deleted (`DELETE /api/v24.3/data/<object>`, on an object
-whose describe says `deletable: true`), but only as a separate step the user asks for and approves.
-Don't add a delete command, and don't offer a delete as the fix for a bad load: fix the mapping
-and run again.
+This skill deletes nothing it loaded. Records can be deleted (`DELETE /api/v24.3/data/<object>`
+with `{"data": [{"id_p": …}]}`, on an object whose describe says `deletable: true`), but only as a
+separate step the user asks for and approves. Don't add a delete command, and don't offer a delete
+as the fix for a bad load: fix the mapping and run again. The one exception is `preflight --run`:
+it deletes each test row it wrote, right after reading it back.
 
 When you call the API yourself, to explore or to check a failure the script reports:
 
@@ -46,8 +47,8 @@ When you call the API yourself, to explore or to check a failure the script repo
 
 The first command that reaches an instance opens a browser tab for the user to sign in. A
 background process then keeps that sign-in in memory, never on disk, and every later command
-reuses it without a tab, until an hour passes with no command or `signout W`. You never see the
-token. `--then` chains steps (`load W --run --then verify`) and stops at the first that fails; a
+reuses it without a tab, until an hour passes with no command or `signout W`; a command that runs
+longer (a big load) keeps it alive and renews the token as it goes. You never see the token. `--then` chains steps (`load W --run --then verify`) and stops at the first that fails; a
 dry run can't chain into `load --run`: the user reads it first.
 
 - Run a command that may open a tab in the background; it waits for the user.
@@ -67,6 +68,7 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 | 2 | `describe W` | both | `schema/` |
 | 3 | `draft W --objects <source objects>` | nothing | `mapping.json`, a `todo` per gap |
 | 4 | Settle every `todo` with the user ([mapping-format.md](mapping-format.md)) | nothing | `mapping.json` |
+| 4a | Optional: `preflight W` lists one test row per object; after the user's yes, `preflight W --run` writes each, reads it back and deletes it | target | `schema/preflight.json`, `reports/preflight.md` |
 | 5 | `extract W` | source | `extract/` |
 | 6 | `load W` (dry run; repeat until 0 failed) | target | `reports/plan.md` only |
 | 7 | `load W --run --limit 20` (pilot), after the user's yes | target | target records |
@@ -76,11 +78,19 @@ From the target instance directory, with `aspen doctor` clean. `W` is
 - The target URL is `instance` in `.aspen/config.toml`. Nothing is ever written to the source.
 - The pilot writes real records, and undoing a bad full load means deleting what it wrote: never
   skip it, and settle values with the user before it rather than testing them on it.
+- `preflight` finds what the describe doesn't declare (a refusal of the object itself, a field the
+  target refuses or sets on its own, a requirement it doesn't mark, a value stored differently) on
+  one test row per object. It is a write: ask first.
+- `--limit` holds back every object except those other entries match by a field (owners matched
+  by email): those load whole, so the rows matching on them find them.
+- Failures the user agrees to leave out go into `accept` ([mapping-format.md](mapping-format.md)),
+  with their reason; a load whose every failure matches one exits 0, and verify doesn't count those
+  rows as not loaded. Never add an entry the user didn't agree to.
 - To create a target object or field: `lean-data-model` → `model-first` → `metadata` →
   `build-and-deploy`, then `describe W --side target`.
 - A load is safe to run again. On a server error for a batch, run again with `--batch 50`.
-- Done when verify reports 0 failed, 0 differences and 0 not loaded, and the user has looked at
-  records in the app. Commit `mapping.json` and `reports/`; the workspace's `.gitignore` keeps
+- Done when verify reports 0 differences and 0 not loaded beyond what `accept` leaves out, and the
+  user has looked at records in the app. Commit `mapping.json` and `reports/`; the workspace's `.gitignore` keeps
   record data out of git.
 
 ## What to tell the user
@@ -92,6 +102,7 @@ Each message: what just happened (one line), what it means, and the one thing yo
 | A tab opened | Which instance it is for, and that the account must be able to read / create `<objects>`. The URL the script printed, if no tab opened. |
 | `describe` | Object counts on each side; which requested objects exist on both. |
 | `draft` | Per object, a `Field \| Proposal \| Why` table: one row per `todo`, per reference picklist the draft mapped, and for the key, each with one proposal from the defaults below. Then the fields that map as they are, on one line. End: "Reply yes to take these, or tell me which rows to change." The first time, add what can't move: created and modified dates and users, history, files, the activity feed. |
+| `preflight --run` | Per object, what the test row found and the proposed fix; that every test row was deleted. |
 | The dry run | To insert, matched, failed; per failing field and problem, its count and the proposed fix. When clean: the pilot ask, naming the target, objects and row counts. |
 | A load | Inserted, failed, held back; a few loaded record names to check in the app; the next step. |
 | `verify` | Sampled, differences, not loaded; whether the migration is done. |

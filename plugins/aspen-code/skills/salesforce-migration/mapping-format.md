@@ -84,15 +84,25 @@ Written by `probe`, read by `draft`: `objects.<Object>.fields.<Field>` is `{ "fi
 fields only. `source` is `"export"` (every record in the export) or `"org"` (a sample of `sample`
 records).
 
+## `schema/sample.json` and `schema/preflight.json`
+
+Written by `preflight`: `sample.json` is each object's fullest source row, the values its test row
+carries; `preflight.json` is what each test row found (`accepted`, `rejected` with the target's
+message, `requiredUndeclared`, `objectRejected`, `coercions`, `serverSet`, and `written`/`deleted`
+counts). Both hold record data and stay out of git; `reports/preflight.md` and the
+**Found by preflight** section of `reports/gaps.md` quote only what the target said.
+
 ## Picklists
 
 Salesforce picklist values are labels like `Biotechnology`; Aspen's are names like `biotech_p`.
 `draft` seeds `map` with each value that matches a target item's name or label, ignoring case, and
 lists the rest in the `todo`, with how many rows hold each. With fill rates, only the values the
 data holds are asked about. An object-dependent picklist (`dependsOn` in `schema/target.json`,
-such as `team_role_p`) is seeded only with the items its parent object allows, so
-`AccountTeamMember` and `OpportunityTeamMember` get different maps. `default` applies to anything
-not in the table; without it, an unmapped value fails the row.
+such as `team_role_p`) is seeded only with the items its parent object allows
+(`picklistsByParent`), so `AccountTeamMember` and `OpportunityTeamMember` get different maps. When
+one object's rows can point at several parents, the field gets `byParent` instead of `map`: one
+table, and one `todo`, per parent object. `default` applies to anything not in the table; without
+it, an unmapped value fails the row.
 
 ## Conversions `load` already does
 

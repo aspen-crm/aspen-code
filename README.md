@@ -42,9 +42,12 @@ document it follows; a person can work it too.
 5. **Builds on it:** decide whether a component should exist and which tier it belongs in, author
    metadata and Rust triggers, validate offline with `aspen compile`, deploy through the check-in
    chain with the user's go-ahead, and prove it with a record round-trip.
-6. **Migrates records** from another Aspen instance with a bundled script. It uses the REST API,
-   and the user signs in to each instance in the browser once; the sign-in is kept in memory for
-   the commands that follow, never stored, and the model never sees it. The user settles the mapping. Then comes a dry run, a pilot, the full load and a check.
+6. **Migrates records** from another Aspen instance, or from a Salesforce org or export, with
+   bundled scripts. They use the REST API, and the user signs in to each instance in the browser
+   once; the sign-in is kept in memory for the commands that follow, never stored, and the model
+   never sees it. A preflight writes and deletes one test row per object to find the rules the
+   describe doesn't declare; the user settles the mapping. Then comes a dry run, a pilot, the full
+   load and a check.
 
 | Skill | When |
 |---|---|
@@ -57,7 +60,8 @@ document it follows; a person can work it too.
 | `custom-ui` | TypeScript pages and layout sections in `typescript/`: where they go, design tokens and components, build/lint checks, verifying the rendered UI |
 | `build-and-deploy` | `aspen compile` → `save-package` → `checkin-prep` → `checkin-index` → `checkin-deploy` → verify |
 | `diagnose` | Failed compiles/check-ins, version skew, login trouble, triggers that don't fire |
-| `instance-migration` | Copy records from another Aspen instance: map objects, fields and picklist values with the user, dry run, pilot, bulk load through the REST API, verify |
+| `instance-migration` | Copy records from another Aspen instance: map objects, fields and picklist values with the user, preflight, dry run, pilot, bulk load through the REST API, verify |
+| `salesforce-migration` | Records from a Salesforce org or export: map onto this instance's model, report the gaps, preflight, extract and load through `instance-migration`'s loader |
 
 Agents: `schema-explorer` and `metadata-reviewer`, both read-only.
 

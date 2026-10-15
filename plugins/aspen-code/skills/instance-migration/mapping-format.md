@@ -2,7 +2,7 @@
 
 One file per migration, in the workspace. `init` writes the connections, `draft` writes the
 objects, and you and the user settle every `todo`. `load` refuses to run while any `todo` is
-left.
+left, including one inside `byParent`.
 
 ```json
 {
@@ -24,9 +24,22 @@ left.
         { "from": "legacy_score_c", "drop": true, "note": "user: not needed" }
       ]
     }
+  ],
+  "accept": [
+    { "object": "company_c", "field": "parent_account_p", "problem": "lookup not in the extract", "max": 12, "note": "user: parents outside the scope stay behind" }
   ]
 }
 ```
+
+## `accept`: failures the user chose to leave out
+
+Each entry names a source object, a target field and the **Problem** text as the report's Errors
+table prints them (`*` matches any run of characters, for a refusal that quotes a value), with an
+optional `max` on the rows it may cover and the user's reason in `note`. A failed row whose every
+error matches an entry is accepted: `load` counts it under Accepted, lists it under
+**Accepted failures** instead of **Errors**, and exits 0 when no other row failed, so a
+`--then` chain goes on. `verify` doesn't count those rows as not loaded. An entry that would cover
+more rows than its `max` covers none, and the report says so: more failed than the user agreed to.
 
 ## Object entries
 
@@ -52,6 +65,7 @@ left.
 | `"objectOf": "what_p"` | For a polyid's companion (`whaton_p`, `customeron_p`, `owneron_p`): the target object the named polyid's id resolved through, or blank when it is blank. Use it rather than a constant whenever the polyid's lookup lists more than one object; it keeps the pair from disagreeing. |
 | `"expr": "…"` | A JavaScript expression over the source row `r`, e.g. `` `${r.first_c} ${r.last_c}`.trim() ``. It returns a string, a number, a boolean or `null`. It is one expression, evaluated as `return (<expr>)`: for statements, wrap them in an arrow function called at once, `(() => { … })()`. Use it only for a rule the user stated, and keep their words in `note`. |
 | `"from": "f", "drop": true` | Nothing. It records that the field was left out on purpose. |
+| `"from": "f", "byParent": {"account_p": {"map": {…}, "default": …}, "opportunity_p": {…}}` | For an object-dependent picklist (`dependsOn` in `schema/target.json`) on rows that point at different objects: the map for the object the record's parent-object field names (`whaton_p`). Each object's table holds only the values `picklistsByParent` allows on it, and may carry its own `todo`. Not with `map`. |
 
 Other keys on a field entry:
 
@@ -84,6 +98,8 @@ Other keys on a field entry:
   checks the CRM rules the describe doesn't declare, in `migrate.mjs`'s `TARGET_RULES`: a
   contact's mobile, office and home phones differ, and so do its work and personal emails.
   Other triggers and validation rules it cannot see: the pilot finds those.
-- `schema/target.json`'s `currencies` lists the codes the instance has a `currency_p` record for.
+- `schema/target.json`'s `currencies` lists the codes the instance has a `currency_p` record for,
+  and `picklistsByParent` each object-dependent picklist field (`"<object>.<field>"`) with its
+  `dependsOn` and the values each parent object allows.
 - A row the target accepts with a `WARNING` counts as loaded, the same as `SUCCESS`.
 - Long text is read in full. A plain query cuts it at 255 characters.

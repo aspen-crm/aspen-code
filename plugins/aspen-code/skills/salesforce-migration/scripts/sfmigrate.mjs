@@ -8,10 +8,11 @@
 //   node sfmigrate.mjs probe <workspace> [--sample 500]   which fields actually hold data -> schema/fill.json
 //   node sfmigrate.mjs draft <workspace> [--redraft]    mapping.json + the gap report
 //   node sfmigrate.mjs gaps <workspace>                 re-report after settling todos
+//   node sfmigrate.mjs preflight <workspace> [--run]    one test row per object on the target, deleted again
 //   node sfmigrate.mjs extract <workspace> [--limit N]  SFDC records -> extract/
 //
 // With --from-export the source is a Salesforce export on disk (manifest.json, describe/<Object>.json
-// and one CSV per object, as export_g17.py writes it) and Salesforce is not reached at all: describe,
+// and one CSV per object) and Salesforce is not reached at all: describe,
 // probe and extract read the files, so a filtered or date-shifted export loads exactly as it is.
 //
 // Then the Aspen side is migrate.mjs in the instance-migration skill, unchanged:
@@ -32,7 +33,7 @@ import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { TARGET_RULES } from '../../instance-migration/scripts/migrate.mjs'
+import { TARGET_RULES, preflightFindings, todos } from '../../instance-migration/scripts/migrate.mjs'
 
 const MIGRATE = fileURLToPath(new URL('../../instance-migration/scripts/migrate.mjs', import.meta.url))
 
@@ -54,10 +55,13 @@ const HELP = `Map a Salesforce object onto this Aspen instance and build the ext
   node sfmigrate.mjs probe <workspace> [--objects <subset>] [--sample 500]
   node sfmigrate.mjs draft <workspace> [--objects <subset>] [--redraft]
   node sfmigrate.mjs gaps <workspace>
+  node sfmigrate.mjs preflight <workspace> [--objects <subset>]   the test rows it would write
+  node sfmigrate.mjs preflight <workspace> --run   one test row per object, read back and deleted
   node sfmigrate.mjs extract <workspace> [--limit N] [--mode bulk|rest]
 
-The Aspen side stays with the instance-migration skill's migrate.mjs: load, pilot, verify and
-signout. The first Aspen command opens the browser to sign in; later ones reuse that sign-in.
+preflight takes each test row's values from the source (schema/sample.json), then hands the write
+to migrate.mjs. The Aspen side stays with the instance-migration skill's migrate.mjs: load, pilot,
+verify and signout. The first Aspen command opens the browser to sign in; later ones reuse that sign-in.
 
 Salesforce is reached through the \`sf\` CLI only, and not at all for an export. Nothing is written
 to Salesforce.`
@@ -600,6 +604,10 @@ function matchField (fname, f, idx) {
   const byLabel = idx.byLabel.get(normalize(f.label))
   if (byLabel) return [byLabel, 'label']
   for (const alt of SYNONYMS[n] ?? []) if (idx.byName.has(alt)) return [idx.byName.get(alt), 'synonym']
+  // A Salesforce lookup is its object's name plus Id, sometimes with a digit (<Object>2Id); Aspen
+  // names the field for the object alone (<object>_p).
+  const stem = n.replace(/_id$/, '')
+  if (stem !== n) for (const s of [stem, stem.replace(/_?\d+$/, '')]) if (s && idx.byName.has(s)) return [idx.byName.get(s), 'name without Id']
   return [null, null]
 }
 
@@ -648,17 +656,30 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
 
     // Salesforce owns these; Aspen stamps its own. Not a decision anyone makes.
     // A computed field is also not createable, but it carries real data and its rule has to go
-    // somewhere on the target, so it is a gap to report rather than a silent drop.
-    if (SF_SYSTEM.has(fname) || (!f.sf.createable && !f.sf.calculated)) {
+    // somewhere on the target, so it is a gap to report rather than a silent drop. Createable is
+    // also the exporting user's permission, not a property of the data: a field the user may not
+    // create still maps when a target field matches.
+    const locked = !f.sf.createable && !f.sf.calculated
+    if (SF_SYSTEM.has(fname) || (locked && !(T && (Object.hasOwn(forced, fname) || matchField(fname, f, idx)[0])))) {
       fields.push({ from: fname, drop: true, note: SF_SYSTEM.has(fname) ? 'Salesforce system field' : 'not createable in Salesforce' })
       continue
     }
 
-    const [tname, rule] = Object.hasOwn(forced, fname)
+    let [tname, rule] = Object.hasOwn(forced, fname)
       ? [Object.keys(T.fields).find((n) => bare(n) === forced[fname]) ?? null, 'junction']
       : T ? matchField(fname, f, idx) : [null, null]
+    // One source field per target field: the first match keeps it.
+    const taken = tname && rule !== 'junction' ? fields.find((x) => x.target === tname && !x.drop) : null
+    if (taken) { tname = null; rule = null }
     row.target = tname; row.rule = rule ?? ''
     const tf = tname ? T.fields[tname] : null
+    if (taken) {
+      row.gap = 'target taken'
+      row.note = `${taken.target} already takes ${taken.from ?? 'another value'}`
+      fields.push({ from: fname, drop: true, note: `no target field; ${row.note}` })
+      rows.push(row); continue
+    }
+    if (locked) row.note = 'not createable for the exporting Salesforce user, but it holds data'
 
     // Nothing on the target to carry it. Drop is the proposal: a new field can't be deleted yet, so it
     // goes through lean-data-model only if the user names a use. The report ranks these by how
@@ -735,7 +756,7 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
     } else if (f.picklist && tf.picklist) {
       const values = valuesOf(fname, f)
       settlePicklist(e, row, values, tgt, tf, null, used(fname))
-      if (tf.dependsOn) dependent.push({ e, row, values, counts: used(fname), tf })
+      if (tf.dependsOn) dependent.push({ e, row, values, counts: used(fname), tf, key: `${target}.${tname}` })
     } else if (f.sf.type === 'percent' && tf.maxValue != null && Number(tf.maxValue) <= 1) {
       // Salesforce holds 50% as 50; the describe says the target takes a fraction.
       delete e.from
@@ -782,12 +803,24 @@ function draftObject (ws, name, src, tgt, migrating, fill) {
 
   // An object-dependent picklist takes only the values its parent object allows. Which object that
   // is comes from the polyid whose companion is the field's parent-object (whaton_p beside what_p).
+  // A row that may point at several objects gets one map per object ("byParent"), each narrowed to
+  // that object's values and each its own todo: the same Salesforce value can need two targets.
   for (const d of dependent) {
     const on = fields.find((x) => x.target === d.tf.dependsOn && x.objectOf && !x.drop)
     const poly = on ? fields.find((x) => x.target === on.objectOf && x.lookup && !x.drop) : null
     const objs = !poly ? [] : typeof poly.lookup === 'object' && !Array.isArray(poly.lookup) ? [poly.lookup.object]
-      : [].concat(poly.lookup).map((x) => pickTargetObject(x, src.objects[x]?.label ?? x, tgt)).filter(Boolean)
-    if (objs.length) settlePicklist(d.e, d.row, d.values, tgt, d.tf, objs, d.counts)
+      : [...new Set([].concat(poly.lookup).map((x) => pickTargetObject(x, src.objects[x]?.label ?? x, tgt)).filter(Boolean))]
+    if (objs.length === 1) settlePicklist(d.e, d.row, d.values, tgt, d.tf, objs, d.counts, d.key)
+    if (objs.length < 2) continue
+    delete d.e.map; delete d.e.todo
+    d.e.byParent = {}
+    const each = objs.map((p) => {
+      const t = {}; const r = { ...d.row, label: `${d.row.label} on ${p}` }
+      settlePicklist(t, r, d.values, tgt, d.tf, [p], d.counts, d.key)
+      d.e.byParent[p] = t
+      return r
+    })
+    rows.splice(rows.indexOf(d.row), 1, ...each)
   }
 
   // Aspen gives any object with a currency field a ccode_p, a lookup to currency_p, and refuses a
@@ -984,10 +1017,13 @@ function seedPicklist (values, items) {
   return { map, missing }
 }
 
-// With `objs`, only the items an object-dependent picklist allows on every one of those objects.
+// With `objs`, only the items an object-dependent picklist allows on every one of those objects:
+// the target's picklistsByParent for the field (`key`), else each item's parentObjects.
 // With `counts`, `values` are the ones the data holds, and each is shown with how often.
-function settlePicklist (e, row, values, tgt, tf, objs, counts = null) {
-  const items = (tgt.picklistItems?.[tf.picklist] ?? []).filter((i) => !objs || !i.parentObjects || objs.every((o) => i.parentObjects.includes(o)))
+function settlePicklist (e, row, values, tgt, tf, objs, counts = null, key = null) {
+  const by = key ? tgt.picklistsByParent?.[key]?.values : null
+  const allowed = (i) => !objs || (by && Object.keys(by).length ? objs.every((o) => by[o]?.includes(i.name)) : !i.parentObjects || objs.every((o) => i.parentObjects.includes(o)))
+  const items = (tgt.picklistItems?.[tf.picklist] ?? []).filter(allowed)
   const { map, missing } = seedPicklist(values, items)
   const where = objs ? ` allows on ${objs.join(' and ')}` : ''
   const shown = (v) => counts ? `${v} (${counts[v]})` : v
@@ -1021,6 +1057,7 @@ function report (ws, m, src, tgt, fill) {
     : fill.source === 'export' ? 'Fill rates and picklist values from every record in the export.\n'
       : `Fill rates from a sample of ${fill.sample} records per object.\n`)
   const headline = []
+  const pf = existsSync(ws.path('schema', 'preflight.json')) ? readJson(ws.path('schema', 'preflight.json')) : null
 
   for (const o of m.objects) {
     const S = src.objects[o.source]
@@ -1043,6 +1080,16 @@ function report (ws, m, src, tgt, fill) {
     if (o.todo) lines.push(`**Object:** ${o.todo}\n`)
     if (o.where) lines.push(`**Extracted:** only rows where \`${o.where}\`.\n`)
     if (o.note) lines.push(`**Note:** ${o.note}\n`)
+
+    // What a test row on the target found that the describe does not declare (sfmigrate preflight).
+    const found = pf?.objects?.[o.source] && pf.objects[o.source].target === o.target ? preflightFindings(pf.objects[o.source], T) : []
+    if (found.length) {
+      lines.push(`### Found by preflight (${pf.run})\n`)
+      lines.push('| Aspen field | Found | The target said | For the load |')
+      lines.push('|---|---|---|---|')
+      for (const r of found) lines.push(`| ${r.field} | ${r.found} | ${cell(r.said)} | ${cell(r.load)} |`)
+      lines.push('')
+    }
 
     if (decide.length) {
       lines.push('### Needs your decision\n')
@@ -1145,7 +1192,7 @@ function main (argv) {
     const next = argv[i + 1]
     if (next && !next.startsWith('--')) { opts[key] = next; i++ } else opts[key] = true
   }
-  if (!['init', 'plan', 'describe', 'probe', 'draft', 'gaps', 'extract'].includes(cmd)) throw new Stop(`unknown command ${cmd}\n\n${HELP}`)
+  if (!['init', 'plan', 'describe', 'probe', 'draft', 'gaps', 'preflight', 'extract'].includes(cmd)) throw new Stop(`unknown command ${cmd}\n\n${HELP}`)
   const ws = workspace(wsArg)
 
   if (cmd === 'init') {
@@ -1266,6 +1313,37 @@ function main (argv) {
     return left.length ? 1 : 0
   }
 
+  if (cmd === 'preflight') {
+    // Each object's fullest source row is its test row's values: real data finds the rules made-up
+    // data passes. migrate.mjs writes and deletes it.
+    const src = schema(ws, 'source')
+    const x = exportOf(m)
+    const sample = {}
+    for (const o of m.objects.filter((y) => y.target)) {
+      const known = new Set(Object.keys(src.objects[o.source]?.fields ?? {}))
+      const live = (o.fields ?? []).filter((e) => !e.drop)
+      const fromExpr = live.flatMap((e) => [...String(e.expr ?? '').matchAll(/\br\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((y) => y[1]))
+      const fields = [...new Set([...live.filter((e) => e.from).map((e) => e.from), ...fromExpr])].filter((f) => f.includes('.') || known.has(f))
+      if (!fields.length) continue
+      let rows = []
+      try { rows = x ? exportRows(x, o, fields, src, 500) : query(ws, m, soql(o.source, fields, o.where, 200), 'rest') } catch (e) {
+        if (!(e instanceof Stop)) throw e
+        say(`${o.source}: no source sample (${e.message}); its test row is made up`)
+        continue
+      }
+      const filled = (r) => fields.filter((f) => r[f] != null && r[f] !== '').length
+      if (rows.length) sample[o.source] = rows.reduce((a, b) => filled(b) > filled(a) ? b : a)
+    }
+    writeJson(ws.path('schema', 'sample.json'), sample)
+    const args = [MIGRATE, 'preflight', ws.dir, ...(opts.run ? ['--run'] : []), ...(typeof opts.objects === 'string' ? ['--objects', opts.objects] : [])]
+    const r = spawnSync(process.execPath, args, { stdio: 'inherit', cwd: ws.root })
+    if (opts.run && existsSync(ws.path('schema', 'preflight.json'))) {
+      report(ws, m, src, schema(ws, 'target'), fillRates(ws))
+      say('reports/gaps.md now carries what preflight found, beside each object')
+    }
+    return r.status ?? 1
+  }
+
   // extract
   const left = todos(m)
   if (left.length) {
@@ -1318,15 +1396,6 @@ function main (argv) {
   }
   say("next: the instance-migration skill's `migrate.mjs load <workspace>` (dry run; writes nothing)")
   return 0
-}
-
-function todos (m) {
-  const out = []
-  for (const o of m.objects) {
-    if (o.todo) out.push(`${o.source}: ${o.todo}`)
-    for (const e of o.fields ?? []) if (e.todo) out.push(`${o.source}.${e.target ?? e.from}: ${e.todo}`)
-  }
-  return out
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

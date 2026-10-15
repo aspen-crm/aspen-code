@@ -8,6 +8,7 @@
 //   node migrate.mjs init <workspace> --source <url> --target <url>
 //   node migrate.mjs describe <workspace> [--side source|target]   schemas → schema/
 //   node migrate.mjs draft <workspace> --objects a,b   add source objects to mapping.json; gaps are todos
+//   node migrate.mjs preflight <workspace> [--run]     one test row per object, written and deleted
 //   node migrate.mjs extract <workspace>               source records → extract/
 //   node migrate.mjs load <workspace>                  dry run → reports/plan.md; writes nothing
 //   node migrate.mjs load <workspace> --run [--limit N] [--batch N]
@@ -15,19 +16,21 @@
 //   node migrate.mjs load <workspace> --run --then verify   steps chained; the first failure stops it
 //   node migrate.mjs signout <workspace> [--side source|target]   end the kept sign-ins
 //
-// The source is only read: its client has no write method. The target is written only by
-// `load --run`, and this script deletes nothing. There is no upsert and `id_p` cannot be set on
-// create, so every target record gets a new id; idmap/<object>.jsonl records source id → target
+// The source is only read: its client has no write method. The target is written by `load --run`,
+// and by `preflight --run`, which deletes each test row it wrote and nothing else. There is no
+// upsert and `id_p` cannot be set on create, so every target record gets a new id;
+// idmap/<object>.jsonl records source id → target
 // id after every batch, which makes a re-run skip what is already loaded. A lookup to its own object, or to an object that
 // loads later, is left blank on insert and filled by a second pass.
 //
 // AQL refuses `>` on id_p and caps OFFSET at 10000, so extract pages by created time (ct_p,
 // indexed): ORDER BY ct_p, id_p, moving a `ct_p >=` window forward before OFFSET runs out.
 //
-// Exit codes: 0 done; 1 rows failed, wait on a parent, or differ on verify; 2 bad invocation, the
-// mapping or the instance is not ready, or a sign-in failed.
+// Exit codes: 0 done; 1 rows failed (beyond the mapping's "accept"), wait on a parent, differ on
+// verify, or a preflight test row could not be deleted; 2 bad invocation, the mapping or the
+// instance is not ready, or a sign-in failed.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IDLE_MS, SignInError, session as openSession, signOut } from './signin.mjs'
@@ -47,10 +50,13 @@ const HELP = `Copy records from a source Aspen instance into this directory's in
   node migrate.mjs init <workspace> --source <url> --target <url>
   node migrate.mjs describe <workspace> [--side source|target]
   node migrate.mjs draft <workspace> --objects <source objects, comma-separated>
+  node migrate.mjs preflight <workspace> [--objects <subset>]   the test rows it would write
+  node migrate.mjs preflight <workspace> --run    write one test row per object, read it back, delete it
   node migrate.mjs extract <workspace>
   node migrate.mjs load <workspace>                     dry run: reports/plan.md, writes nothing
   node migrate.mjs load <workspace> --run               write to the target
-      --limit N   at most N new records per object (a pilot)
+      --limit N   at most N new records per object (a pilot); an object other entries match
+                  by a field (owners onto team_p by email) loads whole
       --batch N   records per request (default ${DEFAULT_BATCH}, max ${MAX_BATCH})
   node migrate.mjs verify <workspace> [--sample N]
   node migrate.mjs signout <workspace> [--side source|target]
@@ -63,8 +69,9 @@ command, or signout. Nothing is stored on disk.
   --then <command> [options]   run another step on the same workspace, e.g.
                                describe <workspace> --side target --then load
                                load <workspace> --run --then verify
-  The chain stops at the first step that does not exit 0. A dry run cannot chain into
-  load --run: the user reads it and says yes first.
+  The chain stops at the first step that does not exit 0; a load whose every failure matches the
+  mapping's "accept" exits 0. A dry run cannot chain into load --run: the user reads it and says
+  yes first. preflight is never chained.
 
 The mapping format is in mapping-format.md beside the skill.`
 
@@ -153,12 +160,34 @@ const schema = (ws, side) => {
 
 // ---- the REST client. The source gets only `reader`; `write` exists for the target alone.
 
+// A command that runs for hours keeps its sign-in alive: every `every` ms it touches the kept
+// sign-in, which otherwise ends an hour after the last touch, and the next request renews the
+// token first. A long load is then not dropped halfway by either clock.
+export const KEEP_MS = 20 * 60 * 1000
+export function keepFresh (session, every = KEEP_MS) {
+  let renewed = Date.now()
+  const timer = setInterval(() => { session.bearer().catch(() => {}) }, every)
+  timer.unref?.()
+  return {
+    async due () {
+      if (Date.now() - renewed < every) return
+      renewed = Date.now()
+      // A renewal refused early is not fatal: the token in hand may still be good, and a refused
+      // request renews (or ends the sign-in) the usual way.
+      try { await session.refreshed() } catch {}
+    },
+    stop: () => clearInterval(timer)
+  }
+}
+
 async function connect (conn, side) {
   const session = await openSession(conn.url, { side, log: say })
+  const fresh = keepFresh(session)
   const base = String(conn.url).replace(/\/+$/, '') + API
   const scrub = (s) => session.secrets().reduce((t, x) => t.split(x).join('<token>'), String(s))
   async function send (method, route, body, { retry = true } = {}) {
     let renewed = false
+    await fresh.due()
     for (let attempt = 1; ; attempt++) {
       const token = await session.bearer()
       let res
@@ -193,7 +222,7 @@ async function connect (conn, side) {
     read,
     query: async (aql) => (await read('/data/query', { query: aql })).data ?? []
   }
-  return { reader, write: (method, object, rows) => send(method, `/data/${object}`, { data: rows }, { retry: false }), close: session.close }
+  return { reader, write: (method, object, rows) => send(method, `/data/${object}`, { data: rows }, { retry: false }), close: () => { fresh.stop(); return session.close() } }
 }
 
 // ---- describe: objects, fields and picklist values, normalized
@@ -218,6 +247,7 @@ async function describeInstance ({ read }) {
     objects[name] = {
       label: v.label ?? name,
       description: v.description ?? null, // what the object is for: choose a target by this, not by its name
+      deletable: v.deletable ?? null, // preflight writes a test row only where it can delete it again
       includedPolyids: v['included-polyids'] ?? [], // the polyids ({object, field}) that may point at this object
       fields: Object.fromEntries((v.fields ?? []).filter((f) => f.active !== false).map((f) => [f.name, {
         label: f.label ?? f.name,
@@ -250,7 +280,29 @@ async function describeInstance ({ read }) {
   // A currency value needs the record's currency_p, so which codes have one decides what loads.
   const code = objects.currency_p && Object.keys(objects.currency_p.fields).find((n) => objects.currency_p.fields[n].unique && objects.currency_p.fields[n].picklist)
   const currencies = code ? [...new Set((await read('/data/query', { query: `SELECT ${code} FROM currency_p LIMIT 1000` })).data?.map((r) => r[code]).filter(Boolean) ?? [])] : null
-  return { objects, picklists, picklistItems, currencies }
+  return { objects, picklists, picklistItems, picklistsByParent: byParent(objects, picklistItems), currencies }
+}
+
+// Each object-dependent picklist field ("<object>.<field>"), the field naming its parent object
+// (dependsOn) and the values each parent object allows: what a map onto it is narrowed to.
+function byParent (objects, picklistItems) {
+  const out = {}
+  for (const [o, O] of Object.entries(objects)) {
+    for (const [n, f] of Object.entries(O.fields)) {
+      if (!f.dependsOn || !f.picklist) continue
+      const values = {}
+      for (const i of picklistItems[f.picklist] ?? []) for (const p of i.parentObjects ?? []) (values[p] ??= []).push(i.name)
+      out[`${o}.${n}`] = { picklist: f.picklist, dependsOn: f.dependsOn, values }
+    }
+  }
+  return out
+}
+
+// The parent objects that allow `value` on an object-dependent field; null when the target names none.
+function allowsOn (lists, object, field, f, value) {
+  const by = lists.picklistsByParent?.[`${object}.${field}`]?.values ?? {}
+  const on = Object.keys(by).filter((p) => by[p].includes(value))
+  return on.length ? on : (lists.picklistItems?.[f.picklist] ?? []).find((i) => i.name === value)?.parentObjects ?? null
 }
 
 // ---- draft: match by name and type; every gap becomes a todo for the user to settle
@@ -300,13 +352,44 @@ function draftObject (name, src, tgt, migrating) {
   return entry
 }
 
-function todos (m) {
+export function todos (m) {
   const out = []
   for (const o of m.objects) {
     if (o.todo) out.push(`${o.source}: ${o.todo}`)
-    for (const e of o.fields ?? []) if (e.todo) out.push(`${o.source}.${e.target ?? e.from}: ${e.todo}`)
+    for (const e of o.fields ?? []) {
+      if (e.todo) out.push(`${o.source}.${e.target ?? e.from}: ${e.todo}`)
+      for (const [p, t] of Object.entries(e.byParent ?? {})) if (t?.todo) out.push(`${o.source}.${e.target} on ${p}: ${t.todo}`)
+    }
   }
   return out
+}
+
+// "accept": failures the user expects and chose to leave out, each by source object, target field
+// and the Problem text the report prints ("*" matches any run of characters), with an optional
+// "max" on the rows it may cover. A row is accepted when every error on it matches one; an entry
+// that would cover more than its max covers none.
+function accepting (m) {
+  const rules = (m.accept ?? []).map((a) => ({ ...a, re: new RegExp(`^${String(a.problem).split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 's') }))
+  return (byObject) => {
+    const over = new Map() // an entry past its max → the rows it would have covered
+    for (;;) {
+      const rows = new Map(rules.map((r) => [r, 0]))
+      const ids = new Map()
+      for (const [object, byRow] of byObject) {
+        const keep = new Set()
+        for (const [id, errs] of byRow) {
+          const hits = errs.map((e) => rules.find((r) => !over.has(r) && r.object === object && r.field === e.field && r.re.test(e.kind)))
+          if (!hits.length || !hits.every(Boolean)) continue
+          keep.add(id)
+          for (const r of new Set(hits)) rows.set(r, rows.get(r) + 1)
+        }
+        ids.set(object, keep)
+      }
+      const more = rules.filter((r) => !over.has(r) && r.max != null && rows.get(r) > r.max)
+      if (!more.length) { for (const [r, n] of over) rows.set(r, n); return { ids, rows, over } }
+      for (const r of more) over.set(r, rows.get(r))
+    }
+  }
 }
 
 // A settled mapping still has to name real things; say which entry is wrong.
@@ -332,7 +415,18 @@ function checkMapping (m, T) {
       if (isMatch(e) && e.lookup.by != null && e.lookup.by !== 'value') throw new Stop(`${at}: a match lookup's "by" is "value" or absent`)
       if (e.normalize && !NORMALIZE.includes(e.normalize)) throw new Stop(`${at}: normalize is one of ${NORMALIZE.join(', ')}`)
       for (const x of [].concat(e.distinctFrom ?? [])) if (!o.fields.some((y) => y.target === x && !y.drop)) throw new Stop(`${at}: distinctFrom ${x} is not a field this object writes`)
+      if (e.byParent) {
+        const on = TO.fields[e.target].dependsOn
+        if (!on) throw new Stop(`${at}: byParent is for an object-dependent picklist, and ${e.target} depends on no object`)
+        if (e.map) throw new Stop(`${at}: use "byParent" or "map", not both`)
+        if (!o.fields.some((x) => x.target === on && !x.drop)) throw new Stop(`${at}: byParent picks its map by ${on}, which this object does not write`)
+      }
     }
+  }
+  for (const a of m.accept ?? []) {
+    if (!a || typeof a.object !== 'string' || typeof a.field !== 'string' || typeof a.problem !== 'string') throw new Stop('mapping.json: each "accept" entry needs "object", "field" and "problem", as the report\'s Errors table prints them')
+    if (!names.has(a.object)) throw new Stop(`mapping.json: accept names ${a.object}, which is not a source object in this mapping`)
+    if (a.max != null && !(Number.isInteger(a.max) && a.max >= 0)) throw new Stop(`mapping.json: accept ${a.object}.${a.field}: "max" is a whole number`)
   }
 }
 
@@ -509,6 +603,7 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
   const errors = []
   const changed = [] // values normalize, truncate or distinctFrom changed or blanked, for the report
   const points = {}
+  const pending = [] // byParent fields: mapped once the object they depend on is known
   let wait = false
   const err = (field, kind, detail) => errors.push({ field, kind, detail })
   for (const e of o.fields) {
@@ -516,6 +611,7 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
     const f = TO.fields[e.target]
     let v
     try { v = raw(e, row) } catch (x) { err(e.target, 'expr failed', x.message); continue }
+    if (e.byParent) { pending.push({ e, f, v }); continue }
     if (e.map && v != null) {
       if (Object.hasOwn(e.map, v)) v = e.map[v]
       else if ('default' in e) v = e.default
@@ -573,12 +669,32 @@ function convert (row, o, TO, lists, { resolve, extracted, refs, deferred, targe
     if (v === null && TO.fields[e.target]?.required) { err(e.target, 'required', `blank: ${e.objectOf} is blank`); continue }
     values[e.target] = v
   }
+  // "byParent": the map for the object the record's parent-object field names.
+  for (const { e, f, v } of wait ? [] : pending) {
+    if (v == null) { if (f.required) err(e.target, 'required', 'blank'); else values[e.target] = null; continue }
+    if (deferred.has(f.dependsOn)) { err(e.target, 'parent object not known on insert', `${f.dependsOn} is filled by the second pass`); continue }
+    const on = values[f.dependsOn]
+    if (on == null) { err(e.target, 'parent object is blank', `${f.dependsOn} is blank`); continue }
+    const t = e.byParent[on]
+    if (!t) { err(e.target, 'no map for that parent object', `${on}: add it to byParent`); continue }
+    let x = v
+    if (t.map) {
+      if (Object.hasOwn(t.map, v)) x = t.map[v]
+      else if ('default' in t) x = t.default
+      else { err(e.target, 'value not in map', `${e.from} = ${v} on ${on}`); continue }
+    }
+    const out = format(x, f)
+    if (out.error) { err(e.target, out.error, String(x)); continue }
+    if (out.value === null && f.required) { err(e.target, 'required', 'blank'); continue }
+    if (out.value != null && f.picklist && !(picklists[f.picklist] ?? []).includes(out.value)) { err(e.target, 'not a value of the target picklist', out.value); continue }
+    values[e.target] = out.value
+  }
   // An object-dependent picklist value must allow the object its parent-object field names.
   for (const [name, v] of Object.entries(values)) {
     const f = TO.fields[name]
     if (wait || !f?.dependsOn || v == null || !(f.dependsOn in values)) continue
     const on = values[f.dependsOn]
-    const allows = (lists.picklistItems?.[f.picklist] ?? []).find((i) => i.name === v)?.parentObjects
+    const allows = allowsOn(lists, o.target, name, f, v)
     if (on == null) err(name, 'parent object is blank', `${f.dependsOn} is blank`)
     else if (allows && !allows.includes(on)) err(name, 'not allowed on that object', `${v} is not allowed on ${on} (only ${allows.join(', ')})`)
   }
@@ -622,6 +738,9 @@ async function load (ws, m, tgt, { run, limit, batch }) {
   checkMapping(m, T)
   const order = loadOrder(m)
   const targetOf = Object.fromEntries(m.objects.map((o) => [o.source, o.target]))
+  // A pilot loads whole every object other entries match by a field (owners onto team_p by
+  // email): held back, each row matching on it would fail for a reason the full load does not have.
+  const whole = new Set(limit == null ? [] : m.objects.filter((o) => m.objects.some((x) => x !== o && x.fields.some((e) => !e.drop && isMatch(e) && e.lookup.object === o.target))).map((o) => o.source))
   const files = (o) => ({ extract: ws.path('extract', `${o.source}.jsonl`), idmap: ws.path('idmap', `${o.source}.jsonl`), patched: ws.path('idmap', `${o.source}.patched.jsonl`), errors: ws.path('errors', `${o.source}.jsonl`) })
   const rows = {}; const extracted = {}; const idmaps = {}; const matched = {}; const planned = {}; const errors = {}; const stats = {}
   const changes = new Map() // "<object>\0<field>\0<what>" → rows: what normalize, truncate and distinctFrom did
@@ -634,7 +753,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     matched[o.source] = new Set(pairs.filter((l) => l.m).map((l) => l.s))
     planned[o.source] = new Set()
     errors[o.source] = []
-    stats[o.source] = { rows: rows[o.source].length, loaded: 0, matched: 0, inserted: 0, updated: 0, waiting: 0, held: 0, failed: 0, patched: 0, pending: 0 }
+    stats[o.source] = { rows: rows[o.source].length, loaded: 0, matched: 0, inserted: 0, updated: 0, waiting: 0, held: 0, failed: 0, accepted: 0, patched: 0, pending: 0 }
   }
   const refs = {}
   for (const ref of matchRefs(m)) {
@@ -688,7 +807,7 @@ async function load (ws, m, tgt, { run, limit, batch }) {
       }
       if (kv != null && keys.has(kv)) { fail(o, row.id_p, { field: keyField(o), kind: 'duplicate key in the source', detail: `another ${o.source} record has the same ${keyField(o)}` }); continue }
       if (kv != null) keys.add(kv)
-      if (limit != null && inserts.length >= limit) { st.held++; continue }
+      if (limit != null && !whole.has(o.source) && inserts.length >= limit) { st.held++; continue }
       inserts.push({ row, values: c.values })
     }
     if (!run) {
@@ -742,43 +861,51 @@ async function load (ws, m, tgt, { run, limit, batch }) {
     })
   }
 
+  const failedRows = new Map()
   for (const { entry: o } of order) {
     const byRow = new Map()
     for (const e of errors[o.source]) byRow.set(e.id, [...(byRow.get(e.id) ?? []), ...e.errors])
     stats[o.source].failed = byRow.size
+    failedRows.set(o.source, byRow)
     writeLines(files(o).errors, [...byRow].map(([id, errs]) => ({ id, errors: errs })))
   }
-  const report = loadReport(m, order, stats, errors, { run, limit, changes })
+  const accepted = accepting(m)(failedRows)
+  for (const [source, ids] of accepted.ids) stats[source].accepted = ids.size
+  const report = loadReport(m, order, stats, failedRows, { run, limit, changes, accepted, whole })
   writeText(ws.path('reports', run ? 'load.md' : 'plan.md'), report)
   const total = (k) => Object.values(stats).reduce((n, s) => n + s[k], 0)
   const incomplete = limit == null && (total('waiting') > 0 || total('pending') > 0)
-  say(`${run ? 'loaded' : 'dry run'}: ${total('inserted')} ${run ? 'inserted' : 'to insert'}, ${total('matched')} matched, ${total('failed')} failed, ${total('waiting')} waiting on a parent; see reports/${run ? 'load' : 'plan'}.md`)
-  return total('failed') > 0 || incomplete ? 1 : 0
+  say(`${run ? 'loaded' : 'dry run'}: ${total('inserted')} ${run ? 'inserted' : 'to insert'}, ${total('matched')} matched, ${total('failed')} failed${total('accepted') ? ` (${total('accepted')} as mapping.json accepts)` : ''}, ${total('waiting')} waiting on a parent; see reports/${run ? 'load' : 'plan'}.md`)
+  return total('failed') > total('accepted') || incomplete ? 1 : 0
 }
 
-function loadReport (m, order, stats, errors, { run, limit, changes = new Map() }) {
+function loadReport (m, order, stats, failedRows, { run, limit, changes = new Map(), accepted, whole = new Set() }) {
   const lines = [
     run ? '# Load' : '# Migration plan (dry run)', '',
     `Source: ${m.source.url}  `, `Target: ${m.target.url}  `, `Run: ${new Date().toISOString()}${limit != null ? ` (pilot: at most ${limit} new records per object)` : ''}`, '',
-    `| # | Source → target | Rows | Already loaded | Matched by key | ${run ? 'Inserted' : 'To insert'} | ${run ? 'Updated' : 'To update'} | Waiting | Held | Failed |`,
-    '|---|---|---|---|---|---|---|---|---|---|'
+    `| # | Source → target | Rows | Already loaded | Matched by key | ${run ? 'Inserted' : 'To insert'} | ${run ? 'Updated' : 'To update'} | Waiting | Held | Failed | Accepted |`,
+    '|---|---|---|---|---|---|---|---|---|---|---|'
   ]
   order.forEach(({ entry: o }, i) => {
     const s = stats[o.source]
-    lines.push(`| ${i + 1} | ${o.source} → ${o.target} | ${s.rows} | ${s.loaded} | ${s.matched} | ${s.inserted} | ${s.updated} | ${s.waiting} | ${s.held} | ${s.failed} |`)
+    lines.push(`| ${i + 1} | ${o.source} → ${o.target} | ${s.rows} | ${s.loaded} | ${s.matched} | ${s.inserted} | ${s.updated} | ${s.waiting} | ${s.held} | ${s.failed} | ${s.accepted} |`)
   })
-  lines.push('', 'Waiting: the record points to a parent that is not loaded yet; it loads on a later run, once the parent does. Held: over `--limit`.')
+  lines.push('', 'Waiting: the record points to a parent that is not loaded yet; it loads on a later run, once the parent does. Held: over `--limit`. Accepted: failed rows that `accept` in mapping.json leaves out.')
+  const wholes = order.filter(({ entry: o }) => whole.has(o.source))
+  if (wholes.length) lines.push('', `Loaded whole in this pilot, because other objects match their records by a field: ${wholes.map(({ entry: o }) => `${o.source} → ${o.target}`).join(', ')}.`)
   const second = order.filter((s) => s.deferred.size)
   if (second.length) {
     lines.push('', '## Filled by the second pass', '')
     for (const { entry: o, deferred } of second) lines.push(`- ${o.source} → ${o.target}: ${[...deferred].join(', ')} (${stats[o.source].patched} ${run ? 'patched' : 'to patch'}, ${stats[o.source].pending} waiting)`)
   }
   const groups = new Map()
+  const kept = new Map()
   for (const { entry: o } of order) {
-    for (const r of errors[o.source]) {
-      for (const e of r.errors) {
+    for (const [id, errs] of failedRows.get(o.source) ?? []) {
+      const into = accepted?.ids.get(o.source)?.has(id) ? kept : groups
+      for (const e of errs) {
         const k = `${o.source}\u0000${e.field}\u0000${e.kind}`
-        groups.set(k, (groups.get(k) ?? 0) + 1)
+        into.set(k, (into.get(k) ?? 0) + 1)
       }
     }
   }
@@ -789,7 +916,16 @@ function loadReport (m, order, stats, errors, { run, limit, changes = new Map() 
   if (groups.size) {
     lines.push('', '## Errors', '', '| Object | Field | Problem | Records |', '|---|---|---|---|')
     for (const [k, n] of groups) { const [o, f, kind] = k.split('\u0000'); lines.push(`| ${o} | ${f} | ${kind.replace(/\|/g, '/')} | ${n} |`) }
-    lines.push('', 'Each record and its values: `errors/<object>.jsonl` (not committed).')
+    lines.push('', 'Each record and its values: `errors/<object>.jsonl` (not committed). To leave a group out on purpose, add it to `accept` in mapping.json with the user\'s reason.')
+  }
+  if (kept.size) {
+    lines.push('', '## Accepted failures', '', 'Rows `accept` in mapping.json leaves out: they do not fail the run.', '', '| Object | Field | Problem | Records |', '|---|---|---|---|')
+    for (const [k, n] of kept) { const [o, f, kind] = k.split('\u0000'); lines.push(`| ${o} | ${f} | ${kind.replace(/\|/g, '/')} | ${n} |`) }
+  }
+  const over = [...(accepted?.over ?? new Map())]
+  if (over.length) {
+    lines.push('', '## Accept entries past their max', '')
+    for (const [r, n] of over) lines.push(`- ${r.object}.${r.field} \`${r.problem}\`: ${n} rows, max ${r.max}. None of them is accepted; more rows fail this way than the user agreed to.`)
   }
   return lines.join('\n') + '\n'
 }
@@ -819,6 +955,8 @@ async function verify (ws, m, tgt, { sample }) {
   for (const ref of matchRefs(m)) {
     refs[`${ref.object}.${ref.match}`] = { source: ref.by === 'value' ? null : readJson(ws.path('extract', 'match', `${ref.object}.${ref.match}.json`)), target: await indexBy(tgt.reader, ref.object, ref.match) }
   }
+  // A row the last load failed in a way `accept` leaves out is not counted as missing.
+  const accepted = accepting(m)(new Map(order.map(({ entry: o }) => [o.source, new Map(readLines(ws.path('errors', `${o.source}.jsonl`)).map((r) => [r.id, r.errors ?? []]))])))
   const ctx = { resolve: (objs, id) => objs.map((x) => idmaps[x]?.get(id)).find(Boolean), extracted, refs, deferred: new Set(), targetOf: Object.fromEntries(m.objects.map((o) => [o.source, o.target])) }
   const out = []; const mismatches = []
   for (const { entry: o } of order) {
@@ -846,12 +984,14 @@ async function verify (ws, m, tgt, { sample }) {
       }
       if (bad) differing++
     }
-    out.push({ o, extracted: rows[o.source].length, loaded: idmaps[o.source].size, notLoaded: [...extracted[o.source]].filter((id) => !idmaps[o.source].has(id)).length, sampled: picked.length, differing })
+    const missing = [...extracted[o.source]].filter((id) => !idmaps[o.source].has(id))
+    const left = missing.filter((id) => accepted.ids.get(o.source)?.has(id)).length
+    out.push({ o, extracted: rows[o.source].length, loaded: idmaps[o.source].size, notLoaded: missing.length - left, accepted: left, sampled: picked.length, differing })
   }
   writeLines(ws.path('errors', 'verify.jsonl'), mismatches)
   const lines = ['# Verify', '', `Target: ${m.target.url}  `, `Run: ${new Date().toISOString()}`, '',
-    '| Source → target | Extracted | Loaded or matched | Not loaded | Sampled | Differing |', '|---|---|---|---|---|---|']
-  for (const r of out) lines.push(`| ${r.o.source} → ${r.o.target} | ${r.extracted} | ${r.loaded} | ${r.notLoaded} | ${r.sampled} | ${r.differing} |`)
+    '| Source → target | Extracted | Loaded or matched | Not loaded | Left out (accept) | Sampled | Differing |', '|---|---|---|---|---|---|---|']
+  for (const r of out) lines.push(`| ${r.o.source} → ${r.o.target} | ${r.extracted} | ${r.loaded} | ${r.notLoaded} | ${r.accepted} | ${r.sampled} | ${r.differing} |`)
   if (mismatches.length) {
     const groups = new Map()
     for (const x of mismatches) groups.set(`${x.object}\u0000${x.field}`, (groups.get(`${x.object}\u0000${x.field}`) ?? 0) + 1)
@@ -861,8 +1001,314 @@ async function verify (ws, m, tgt, { sample }) {
   }
   writeText(ws.path('reports', 'verify.md'), lines.join('\n') + '\n')
   const notLoaded = out.reduce((n, r) => n + r.notLoaded, 0)
-  say(`verify: ${out.reduce((n, r) => n + r.sampled, 0)} sampled, ${mismatches.length} differences, ${notLoaded} not loaded; see reports/verify.md`)
+  const left = out.reduce((n, r) => n + r.accepted, 0)
+  say(`verify: ${out.reduce((n, r) => n + r.sampled, 0)} sampled, ${mismatches.length} differences, ${notLoaded} not loaded${left ? `, ${left} left out as mapping.json accepts` : ''}; see reports/verify.md`)
   return mismatches.length || notLoaded ? 1 : 0
+}
+
+// ---- preflight: one test row per object, written, read back and deleted, to find what the
+// describe does not declare (a refusal of the object itself, a field the target refuses or sets on
+// its own, a requirement it does not mark, a value it stores differently) before the decision
+// round rather than on the pilot. At most one test row per object exists at a time.
+
+const PROBE_ATTEMPTS = 16
+// What a refusal means, by its text, and what that means for the load.
+const FINDINGS = [
+  ['set by the server', /system fields?|read[- ]only|not (writable|creatable|updatable)|cannot be (set|written)/i, 'Aspen sets it: drop it from the mapping'],
+  ['required', /required|must (have|be given|contain) a value|cannot be (blank|empty)|mandatory/i, 'a row without a value fails: map a field or a constant'],
+  ['unique', /unique|already (in use|exists)|duplicate/i, 'a value already on the target, or twice in the source, fails'],
+  ['type', /invalid type|not a valid|integer|whole number|decimal/i, 'a value of that shape fails: convert it ("expr") or drop the field']
+]
+const RULE = 'a row like the test row fails: ask the user what the rule means for this data'
+const findingOf = (msg) => FINDINGS.find(([, re]) => re.test(msg))?.[0] ?? 'rule'
+const forLoad = (kind) => FINDINGS.find(([k]) => k === kind)?.[2] ?? RULE
+const messageOf = (f) => f.display_detail || f.detail || [f.error_type, f.subtype].filter(Boolean).join('/') || 'no reason given'
+
+// The first line of a jsonl file, without reading the rest.
+function firstRow (p) {
+  if (!existsSync(p)) return null
+  const fd = openSync(p, 'r')
+  try {
+    const buf = Buffer.alloc(1 << 20)
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    const line = buf.subarray(0, n).toString('utf8').split('\n')[0]
+    return line ? JSON.parse(line) : null
+  } catch { return null } finally { closeSync(fd) }
+}
+
+// Real values make the better test: schema/sample.json (sfmigrate preflight writes it from the
+// source), else the extract's first row. Without either, every value is made up.
+function samples (ws) {
+  const file = ws.path('schema', 'sample.json')
+  const given = existsSync(file) ? readJson(file) : {}
+  return (source) => given[source] ?? firstRow(ws.path('extract', `${source}.jsonl`))
+}
+
+// A value of the field's type that the declared rules accept.
+function synthetic (f, tag, row, object, name, T) {
+  if (f.type === 'text') {
+    const v = f.subtype === 'email' ? `preflight.${tag}@example.com` : f.subtype === 'phone' ? '+14155550123' : f.subtype === 'url' ? `https://example.com/${tag}` : `Preflight ${tag}`
+    return f.maxLength != null ? [...v].slice(0, f.maxLength).join('') : v
+  }
+  if (f.type === 'number' || f.type === 'currency') {
+    let n = 1
+    if (f.maxValue != null && Number(f.maxValue) < n) n = Number(f.maxValue)
+    if (f.minValue != null && Number(f.minValue) > n) n = Number(f.minValue)
+    return String(n)
+  }
+  if (f.type === 'checkbox') return 'false'
+  if (f.type === 'date') return new Date().toISOString().slice(0, 10)
+  if (f.type === 'datetime') return new Date().toISOString()
+  if (f.type === 'picklist' && f.picklist) {
+    const items = T.picklists?.[f.picklist] ?? []
+    return (f.dependsOn ? items.filter((i) => (allowsOn(T, object, name, f, i) ?? [row[f.dependsOn]]).includes(row[f.dependsOn])) : items)[0] ?? null
+  }
+  return null
+}
+
+// The value a mapped field gets in the test row: the sample's, converted the way load would, when
+// the target's declared rules accept it; else a synthetic one.
+function testValue (e, f, sample, row, object, T, tag) {
+  let v = null
+  if (sample) {
+    try {
+      v = raw(e, sample)
+      const table = e.byParent ? e.byParent[row[f.dependsOn]] : e
+      if (v != null && table?.map) v = Object.hasOwn(table.map, v) ? table.map[v] : 'default' in table ? table.default : null
+      const out = format(v, f)
+      v = out.error ? null : out.value
+      if (v != null && e.normalize) v = NORMALIZERS[e.normalize](v, f)
+      if (v != null && e.truncate && f.maxLength != null) v = [...v].slice(0, f.maxLength).join('')
+      if (v != null && f.type === 'picklist' && f.picklist && !(T.picklists?.[f.picklist] ?? []).includes(v)) v = null
+      if (v != null && f.dependsOn) { const a = allowsOn(T, object, e.target, f, v); if (a && !a.includes(row[f.dependsOn])) v = null }
+      if (v != null && rejects(v, f)) v = null
+    } catch { v = null }
+  }
+  return v ?? synthetic(f, tag, row, object, e.target, T)
+}
+
+// The test row for one entry: its lookups point at existing target records, its values come from
+// the sample, a unique text is made unique the way that keeps its shape (an email keeps its
+// domain), and what the target requires but nothing writes is filled in.
+async function testRow (o, TO, T, m, sample, pick, tag) {
+  const row = {}
+  const notes = []
+  const targetOf = Object.fromEntries(m.objects.map((x) => [x.source, x.target]))
+  const isCompanion = (n) => Object.values(TO.fields).some((x) => x.relatedObjectField === n)
+  const point = async (n, objs) => {
+    const r = await pick(objs.filter(Boolean))
+    if (!r) { notes.push(`${n}: no ${objs.filter(Boolean).join(' or ') || 'record it may point at'} on the target, so the test row leaves it out`); return }
+    row[n] = r.id
+    if (TO.fields[n].relatedObjectField) row[TO.fields[n].relatedObjectField] = r.object
+  }
+  const ref = (f) => f.type === 'polyid' || (f.type === 'id' && f.subtype !== 'file')
+  const live = o.fields.filter((e) => e.target && !e.drop && !e.objectOf && !SYSTEM.has(e.target) && TO.fields[e.target] && !(TO.fields[e.target].type === 'id' && TO.fields[e.target].subtype === 'file'))
+  for (const e of live) {
+    const f = TO.fields[e.target]
+    if (row[e.target] !== undefined || !(e.lookup || ref(f))) continue
+    await point(e.target, isMatch(e) ? [e.lookup.object] : lookupObjects(e).length ? lookupObjects(e).map((x) => targetOf[x]) : f.lookup ? [f.lookup] : f.objects ?? [])
+  }
+  for (const e of live) {
+    const f = TO.fields[e.target]
+    if (row[e.target] !== undefined || e.lookup || ref(f)) continue
+    const v = testValue(e, f, sample, row, o.target, T, tag)
+    if (v != null) row[e.target] = v
+  }
+  for (const [n, f] of writable(TO)) {
+    if (!f.required || row[n] !== undefined || isCompanion(n)) continue
+    if (ref(f)) await point(n, f.lookup ? [f.lookup] : f.objects ?? [])
+    else { const v = synthetic(f, tag, row, o.target, n, T); if (v != null) row[n] = v }
+  }
+  for (const [n, f] of Object.entries(TO.fields)) {
+    if (!f.unique || f.type !== 'text' || row[n] == null || /_chk_p$/.test(n)) continue
+    const v = String(row[n]); const at = v.lastIndexOf('@')
+    const email = f.subtype === 'email' || /^[^@\s]+@[^@\s]+$/.test(v)
+    let u = email && at > 0 ? `preflight.${tag}.${v}` : `${v} ${tag}`
+    if (f.maxLength != null && [...u].length > f.maxLength) u = email && at > 0 ? `p${tag}${v.slice(at)}` : `${[...v].slice(0, Math.max(0, f.maxLength - tag.length - 1)).join('')} ${tag}`
+    row[n] = u
+  }
+  return { row, notes }
+}
+
+// An existing target record of the first of `objs` that has one, for a lookup to point at.
+function picker (tgt, T) {
+  const seen = new Map()
+  return async (objs) => {
+    for (const x of objs) {
+      if (!seen.has(x)) {
+        let id = null
+        if (T.objects[x] && /^\w+$/.test(x)) { try { id = (await tgt.reader.query(`SELECT id_p FROM ${x} LIMIT 1`))[0]?.id_p ?? null } catch {} }
+        seen.set(x, id)
+      }
+      if (seen.get(x)) return { object: x, id: seen.get(x) }
+    }
+    return null
+  }
+}
+
+// Write the row; take out each field the target refuses (or fill one it requires) and write again,
+// until a row is accepted. A refusal tied to no field is narrowed by halving the optional fields.
+// Every row written is read back, then deleted.
+async function probe (tgt, o, TO, start, fill) {
+  const res = { accepted: [], rejected: {}, requiredUndeclared: {}, objectRejected: null, coercions: {}, serverSet: {}, written: 0, deleted: 0, undeleted: [] }
+  let attempts = 0
+  const polyOf = (n) => Object.keys(TO.fields).find((x) => TO.fields[x].relatedObjectField === n)
+  const unit = (n) => [n, TO.fields[n]?.relatedObjectField].filter(Boolean) // a polyid and its companion travel together
+  const without = (r, n) => { const out = { ...r }; for (const x of unit(polyOf(n) ?? n)) delete out[x]; return out }
+  const insert = async (r) => {
+    attempts++
+    const x = await tgt.write('POST', o.target, [r])
+    const d = Array.isArray(x.json?.data) && x.json.data.length === 1 ? x.json.data[0] : null
+    if (applied(d?.status) && d.id) { res.written++; return { id: d.id } }
+    return { failures: d?.failures?.length ? d.failures : x.json?.failures?.length ? x.json.failures : [{ detail: `HTTP ${x.status} ${x.text}` }] }
+  }
+  const remove = async (id) => {
+    const x = await tgt.write('DELETE', o.target, [{ id_p: id }])
+    const d = Array.isArray(x.json?.data) ? x.json.data[0] : null
+    if (applied(d?.status)) res.deleted++
+    else res.undeleted.push({ id, why: failureText(d) || failureText(x.json) || `HTTP ${x.status}` })
+  }
+  const refused = (r, n, msg) => { res.rejected[n] = { finding: findingOf(msg), message: msg, sent: r[n] } }
+  let row = { ...start }
+  let id = null
+  while (attempts < PROBE_ATTEMPTS) {
+    const r = await insert(row)
+    if (r.id) { id = r.id; break }
+    let moved = false
+    for (const f of r.failures) {
+      const n = f.context?.field_name
+      if (!n || !TO.fields[n] || SYSTEM.has(n)) continue
+      if (n in row) { refused(row, n, messageOf(f)); row = without(row, n); moved = true } else if (!(n in res.requiredUndeclared)) {
+        res.requiredUndeclared[n] = messageOf(f)
+        const v = await fill(n, row)
+        if (v) { row = { ...row, ...v }; moved = true }
+      }
+    }
+    if (moved) continue
+    const why = r.failures.map(messageOf).join('; ')
+    // Refused for no field the row names: cut to what it must carry, it tells a refusal of the
+    // object itself from a field among the rest.
+    const must = (n) => TO.fields[n]?.required || n in res.requiredUndeclared || unit(n).some((x) => TO.fields[x]?.required)
+    const base = Object.fromEntries(Object.entries(row).filter(([n]) => must(n) || must(polyOf(n) ?? n)))
+    if (Object.keys(base).length === Object.keys(row).length) { res.objectRejected = { finding: findingOf(why), message: why }; break }
+    const b = await insert(base)
+    if (!b.id) { const w = b.failures.map(messageOf).join('; '); res.objectRejected = { finding: findingOf(w), message: w }; break }
+    await remove(b.id)
+    let suspects = Object.keys(row).filter((n) => !(n in base) && !polyOf(n))
+    while (suspects.length > 1 && attempts < PROBE_ATTEMPTS) {
+      const half = suspects.slice(0, Math.ceil(suspects.length / 2))
+      const t = await insert({ ...base, ...Object.fromEntries(half.flatMap(unit).filter((n) => n in row).map((n) => [n, row[n]])) })
+      if (t.id) { await remove(t.id); suspects = suspects.slice(half.length) } else suspects = half
+    }
+    if (suspects.length !== 1) break
+    refused(row, suspects[0], why)
+    row = without(row, suspects[0])
+  }
+  res.attempts = attempts
+  if (!id) return res
+  res.accepted = Object.keys(row)
+  // What the target kept: a value stored differently is a coercion, a field the row left out that
+  // came back filled is one Aspen sets on its own.
+  const select = async (names) => (await tgt.reader.query(`SELECT id_p, ${names.map((n) => column([n, TO.fields[n]])).join(', ')} FROM ${o.target} WHERE id_p = ${literal(id)} LIMIT 1`))[0] ?? null
+  let got = null
+  let all = true
+  try { got = await select(selectable(TO).map(([n]) => n)) } catch {
+    all = false
+    try { got = await select(Object.keys(row).filter((n) => TO.fields[n] && !SYSTEM.has(n))) } catch {}
+  }
+  if (got) {
+    for (const [n, sent] of Object.entries(row)) if (n in got && !same(sent, got[n], TO.fields[n])) res.coercions[n] = { sent, stored: got[n] ?? null }
+    if (all) for (const [n] of selectable(TO)) if (!(n in row) && got[n] != null && got[n] !== '') res.serverSet[n] = String(got[n]).slice(0, 80)
+  }
+  await remove(id)
+  return res
+}
+
+// One object's findings, in the words the report and sfmigrate's gap report use. Values from the
+// sample stay out: only what the target said.
+export function preflightFindings (res, TO) {
+  const rows = []
+  const shown = (v, f) => v == null ? 'blank' : ['number', 'currency', 'checkbox', 'date', 'datetime'].includes(f?.type) ? `\`${v}\`` : null
+  if (res.notProbed) rows.push({ field: '(object)', found: 'not probed', said: res.notProbed, load: 'the pilot is the first write to it' })
+  if (res.objectRejected) rows.push({ field: '(object)', found: 'refused whatever the row holds', said: res.objectRejected.message, load: 'every row fails: leave the object out, or settle what the target said first' })
+  for (const [n, msg] of Object.entries(res.requiredUndeclared ?? {})) rows.push({ field: n, found: 'required, not declared', said: msg, load: forLoad('required') })
+  for (const [n, r] of Object.entries(res.rejected ?? {})) rows.push({ field: n, found: r.finding, said: r.message, load: forLoad(r.finding) })
+  for (const [n, c] of Object.entries(res.coercions ?? {})) {
+    const f = TO?.fields?.[n]
+    const a = shown(c.sent, f); const b = shown(c.stored, f)
+    rows.push({ field: n, found: 'stored differently than sent', said: a && b ? `sent ${a}, stored ${b}` : '', load: 'verify reports these as differences: convert the value the same way ("expr"), or expect them' })
+  }
+  return rows
+}
+
+function preflightReport (out, T) {
+  const cell = (v) => String(v ?? '').replace(/\s+/g, ' ').replace(/\|/g, '/')
+  const lines = ['# Preflight', '', `Target: ${out.url}  `, `Run: ${out.run}`, '',
+    'One test row per object, written, read back and deleted. Listed: only what the describe does not declare. `schema/preflight.json` has every field.']
+  for (const [source, res] of Object.entries(out.objects)) {
+    lines.push('', `## ${source} → ${res.target}`, '')
+    const rows = preflightFindings(res, T.objects[res.target])
+    if (rows.length) {
+      lines.push('| Field | Found | The target said | For the load |', '|---|---|---|---|')
+      for (const r of rows) lines.push(`| ${r.field} | ${r.found} | ${cell(r.said)} | ${cell(r.load)} |`)
+    } else if (!res.notProbed) lines.push('Nothing the describe does not declare.')
+    const set = Object.keys(res.serverSet ?? {})
+    if (set.length) lines.push('', `Aspen filled on its own: ${set.join(', ')}.`)
+    for (const n of res.notes ?? []) lines.push('', `- ${n}`)
+    for (const u of res.undeleted ?? []) lines.push('', `**Not deleted:** test row ${u.id} (${cell(u.why)}). Delete it in the app.`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+async function preflight (ws, m, tgt, { run, objects }) {
+  const T = schema(ws, 'target')
+  const want = objects ? new Set(objects.split(',').map((s) => s.trim()).filter(Boolean)) : null
+  for (const n of want ?? []) if (!m.objects.some((o) => o.source === n)) throw new Stop(`${n} is not a source object in mapping.json`)
+  const entries = m.objects.filter((o) => o.target && T.objects[o.target] && (!want || want.has(o.source)))
+  if (!entries.length) throw new Stop('no object in mapping.json has a target on this instance yet; settle the targets first')
+  const pick = picker(tgt, T)
+  const sampleOf = samples(ws)
+  const out = { url: m.target.url, run: new Date().toISOString(), objects: {} }
+  let stuck = 0
+  for (const o of entries) {
+    const TO = T.objects[o.target]
+    const tag = Math.random().toString(36).slice(2, 8)
+    const res = out.objects[o.source] = { target: o.target }
+    if (TO.deletable === false) {
+      res.notProbed = `${o.target} records cannot be deleted, so a test row would stay`
+      say(`${o.source} → ${o.target}: not probed; ${res.notProbed}`)
+      continue
+    }
+    const { row, notes } = await testRow(o, TO, T, m, sampleOf(o.source), pick, tag)
+    Object.assign(res, { row, notes })
+    if (!run) {
+      say(`${o.source} → ${o.target}: a test row of ${Object.keys(row).length} fields`)
+      for (const [n, v] of Object.entries(row)) say(`  ${n} = ${String(v).length > 60 ? `${String(v).slice(0, 57)}...` : v}`)
+      for (const n of notes) say(`  (${n})`)
+      continue
+    }
+    const fill = async (n, current) => {
+      const f = TO.fields[n]
+      if (f.type === 'polyid' || f.type === 'id') {
+        const r = await pick(f.lookup ? [f.lookup] : f.objects ?? [])
+        return r ? { [n]: r.id, ...(f.relatedObjectField ? { [f.relatedObjectField]: r.object } : {}) } : null
+      }
+      const v = synthetic(f, tag, current, o.target, n, T)
+      return v == null ? null : { [n]: v }
+    }
+    Object.assign(res, await probe(tgt, o, TO, row, fill))
+    stuck += res.undeleted.length
+    const found = preflightFindings(res, TO).length
+    say(`${o.source} → ${o.target}: ${res.written ? `${res.written} test row(s) written, ${res.deleted} deleted` : 'no test row accepted'}; ${found} finding(s)${res.undeleted.length ? `; ${res.undeleted.length} NOT deleted` : ''}`)
+  }
+  if (!run) {
+    say('nothing written. `preflight --run` writes each row above, reads it back and deletes it, once the user says yes')
+    return 0
+  }
+  writeJson(ws.path('schema', 'preflight.json'), out)
+  writeText(ws.path('reports', 'preflight.md'), preflightReport(out, T))
+  say(`see reports/preflight.md${stuck ? `; ${stuck} test row(s) could not be deleted: it names them` : ''}`)
+  return stuck ? 1 : 0
 }
 
 // ---- commands
@@ -888,7 +1334,7 @@ function options (args) {
   return { ...o, limit: count('limit', 0, Number.MAX_SAFE_INTEGER), batch: count('batch', 1, MAX_BATCH) ?? DEFAULT_BATCH, sample: count('sample', 1, 1000) ?? 20 }
 }
 
-const COMMANDS = ['init', 'describe', 'draft', 'extract', 'load', 'verify', 'signout']
+const COMMANDS = ['init', 'describe', 'draft', 'preflight', 'extract', 'load', 'verify', 'signout']
 
 export async function main (argv) {
   const [cmd, wsArg, ...rest] = argv
@@ -898,7 +1344,7 @@ export async function main (argv) {
   for (const a of rest) a === '--then' ? steps.push([]) : steps.at(-1).push(a)
   const plan = steps.map(([c, ...o]) => {
     if (!COMMANDS.includes(c)) throw new Stop(`unknown command: ${c ?? '(none after --then)'}\n\n${HELP}`)
-    if ((c === 'init' || c === 'signout') && steps.length > 1) throw new Stop(`${c} cannot be chained: run it on its own`)
+    if (['init', 'signout', 'preflight'].includes(c) && steps.length > 1) throw new Stop(`${c} cannot be chained: run it on its own`)
     return { cmd: c, opts: options(o) }
   })
   if (plan.some((s, i) => s.cmd === 'load' && s.opts.run && plan.slice(0, i).some((p) => p.cmd === 'load' && !p.opts.run))) {
@@ -991,6 +1437,7 @@ async function run (cmd, ws, m, opts, open) {
     return 0
   }
   const target = await open('target')
+  if (cmd === 'preflight') return preflight(ws, m, target, opts)
   if (cmd === 'load') return load(ws, m, target, opts)
   return verify(ws, m, target, opts)
 }
