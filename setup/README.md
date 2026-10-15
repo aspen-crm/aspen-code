@@ -119,12 +119,8 @@ If the host refuses to run the installer, hand the user the command for their OS
 to run it in their own terminal. Then wait.
 
 **Check:** `~/.aspen/bin/aspen --version` prints a version. This session's PATH predates the
-install, so use the full path for the rest of this session.
-
-**Ask the user to put it on their PATH.** Don't edit their shell profile yourself. Give them the
-line to add: `. "$HOME/.aspen/env"` in `~/.zshrc` (zsh) or `~/.bashrc` (bash; `~/.bash_profile` on
-macOS), `source "$HOME/.aspen/env.fish"` in `~/.config/fish/config.fish` (fish). On Windows, give
-them the change the installer printed. New terminals then find `aspen`.
+install, so use the full path for the rest of this session. Don't suggest a PATH or shell-profile
+change, even when the installer prints one.
 
 ### 3. Sign in — you run it, the user approves
 
@@ -158,12 +154,11 @@ the OS keychain, or in this file only if the user chose file storage.
 
 No restart is needed. Tell the user:
 
-1. **Load the plugin** into this session:
-   - **Claude Code:** type `/reload-plugins`.
-   - **Codex:** type `/new` to start a new thread, which picks up the plugin. When asked, review
-     and **trust** the Aspen Code hooks. They run the setup checks and make sure every `aspen`
-     command uses the right CLI, folder and instance.
-2. Send this as the first prompt:
+1. **Load the plugin** — type `/reload-plugins`.
+   - **Codex:** type `/new` instead, to start a new thread, which picks up the plugin. When asked,
+     review and **trust** the Aspen Code hooks. They run the setup checks and make sure every
+     `aspen` command uses the right CLI, folder and instance.
+2. **After reloading plugins**, send this as your next prompt:
 
    ```text
    Set me up to build on my Aspen instance at https://<host>/<domain>/<instance>.
@@ -189,7 +184,7 @@ a renewal date and an auto-renew flag to accounts, and show them on the account 
 |---|---|
 | `marketplace add` fails | Codex without git: use the download in step 1. Otherwise GitHub is unreachable from this network |
 | Two copies of each Aspen skill | The production `aspen-code@aspen` is still installed: remove it (step 1's check) |
-| `aspen: command not found` right after installing | Use `~/.aspen/bin/aspen`, or add the PATH line from step 2 and open a new terminal |
+| `aspen: command not found` right after installing | Use the full path, `~/.aspen/bin/aspen` |
 | `aspen login` says "Interactive login is not supported" | It ran under an agent without `--agent no` and `ASPEN_INTERACTIVE=1`: use the step 3 command |
 | npm fails with `E401` / "Unable to authenticate" | `typescript/package-lock.json` was resolved through a private mirror. When the plugin asks, let it delete the lockfile and `node_modules` and re-install from public npm |
 | Go back to production | `claude plugin uninstall aspen-code@aspen-code`, then `claude plugin install aspen-code@aspen`. Codex: `codex plugin remove aspen-code@aspen-code`, then `codex plugin add aspen-code@aspen` |
