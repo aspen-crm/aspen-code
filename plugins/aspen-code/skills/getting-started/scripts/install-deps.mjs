@@ -149,7 +149,7 @@ function plan () {
             : { cmd: 'sh', argv: ['-c', "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none"] },
           note: WIN
             ? 'Building on Windows also needs the Visual Studio C++ Build Tools for the host-side build scripts.'
-            : 'Leaves shell profiles alone; the user adds `. "$HOME/.cargo/env"` to theirs to put cargo on PATH.'
+            : 'Leaves shell profiles alone, so cargo is not on PATH; put `PATH="$HOME/.cargo/bin:$PATH"` in front of aspen commands.'
         })
     const installed = ru ? capture(ru, ['toolchain', 'list']) ?? '' : ''
     const haveChannel = installed.split('\n').some((l) => l.startsWith(`${pin.channel}-`) || l.split(' ')[0] === pin.channel)
