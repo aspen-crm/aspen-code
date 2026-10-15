@@ -113,10 +113,11 @@ node "<this skill's dir>/scripts/install-deps.mjs" <dir> --run --machine   # als
    `package-lock.json` resolved through a mirror → ask, then delete it and `typescript/node_modules`
    and re-run.
 4. The first `npm install` writes `typescript/package-lock.json` — suggest committing it.
-5. rustup installs with `--no-modify-path`; if the run installed it, ask the user to add
-   `. "$HOME/.cargo/env"` to their profile (fish: `source "$HOME/.cargo/env.fish"`). The script
-   finds rustup in `~/.cargo/bin` itself. On Windows, Rust also needs the Visual Studio C++ Build
-   Tools, which the script can't install; say so.
+5. rustup installs with `--no-modify-path`; don't suggest a PATH or shell-profile change. The
+   script finds rustup in `~/.cargo/bin` itself. `aspen compile` and `aspen doctor` run `cargo`
+   and `rustup` from PATH, so when `cargo` isn't on it, put `PATH="$HOME/.cargo/bin:$PATH"` in
+   front of them. On Windows, Rust also needs the Visual Studio C++ Build Tools, which the script
+   can't install; say so.
 
 ## 5. Check the directory — `aspen doctor`
 
