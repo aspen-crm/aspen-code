@@ -28,7 +28,8 @@ Not routed here from `using-aspen`? Read its "Where the docs are wrong" table fi
   and commits the rest is pattern 7; validate, then create another record once the save commits
   (all four insert/update events) is pattern 8. It builds against the scaffolded crate
   with `jiff = "0.2"` added and its registration in `aspen.server.json`. Copy the helpers and the
-  closest handler.
+  closest handler. Whole triggers in a working model, with the fields they read, are in the
+  sample instances: [samples.md](../using-aspen/samples.md).
 - **[rust-trigger-notes.md](rust-trigger-notes.md)** has what the docs leave out: the toolchain pin
   and lockfile, the variant per field type (polyids and their discriminators), `.failures()` on
   writes, date arithmetic, which platform objects allow triggers, and the checklist for a trigger
