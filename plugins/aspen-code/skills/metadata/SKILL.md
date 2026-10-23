@@ -19,6 +19,8 @@ Not routed here from `using-aspen`? Read its "Where the docs are wrong" table fi
    - `metadata/platform/<ctype path>/` — the platform's own components.
    - `metadata/compiled/` — the resolved result after a compile, every default filled in; strip
      resolved-only keys when you copy.
+   - The sample instances, when none of these has the shape or you want one wired to the rest
+     (object, layout, list view, tab, collection): [samples.md](../using-aspen/samples.md).
 
    Filter a large file with `jq`, e.g.
    `jq '.fields[] | select(.type=="picklist")' metadata/platform/object_p/opportunity_p.json`.

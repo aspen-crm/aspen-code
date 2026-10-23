@@ -53,7 +53,8 @@ Write it before authoring and show the human, one row per thing the request asks
 - A tier-3 row needs a reason, or it isn't built.
 - A tier-2 row names the stored field it maintains; a trigger that stores nothing is a tier-3
   answer.
-- Format and worked rows from real instances: [placement-table.md](placement-table.md).
+- Format and worked rows from real instances: [placement-table.md](placement-table.md). Three
+  whole models placed this way, metadata and triggers: [samples.md](../using-aspen/samples.md).
 
 ## When tier 3 is right
 

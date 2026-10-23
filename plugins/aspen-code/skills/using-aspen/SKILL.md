@@ -47,6 +47,9 @@ turn — and go straight to `metadata`.
 Read-only subagents: `schema-explorer` answers a model-shape question across many objects;
 `metadata-reviewer` audits a non-trivial metadata diff before deploy.
 
+Worked examples: three sample instances with their metadata, triggers and data
+([samples.md](samples.md)).
+
 ## Rules
 
 - **`aspen <command> --help` and the compiler are the authority** on the CLI. When a skill

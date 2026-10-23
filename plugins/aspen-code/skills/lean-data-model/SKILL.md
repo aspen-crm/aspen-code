@@ -41,6 +41,10 @@ State the decision in a line or two, for example:
 "Yes, build it" is often right — a distinct concept, lifecycle or audience, or records that
 outlive the parent. Say which and carry on.
 
+The sample instances ([samples.md](../using-aspen/samples.md)) make the call both ways: each adds
+one custom object (a position, a subscription, an installed machine) and puts everything else on
+platform objects as fields, record types and picklists.
+
 ## Size checks
 
 On an unfamiliar instance, and when a request adds an object, picklist or tab, raise these with
