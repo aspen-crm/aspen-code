@@ -65,6 +65,13 @@ text glyph or emoji for an icon.
 A hook checks every write in `typescript/` against these rules. Its denial names the rule and the
 escape hatch (`aspen-token-exempt:` / `aspen-component-exempt:` with a reason); follow it.
 
+**No descriptive copy unless asked.** A page, section, card, list, table or counter shows its title
+or label and its data, nothing that describes them: no subtitle, intro or summary paragraph,
+section description, caption under a counter, "Showing …" or "Last updated …" line, field help
+text, or text restating a heading, label or column. Add one only where the user asked for it on
+that page, section or list; the request does not carry to the others. Still write field labels,
+column headers, button text, empty, loading and error states, and validation messages.
+
 ## 4. Build and check
 
 ```sh

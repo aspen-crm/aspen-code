@@ -49,9 +49,9 @@ platform component or uses local markup. Do not invent imports or reach into pla
   action buttons touch the table. If a compact variant is needed, verify that variant instead
   of inventing smaller type or spacing to make the form fit.
 - Follow the native surface's action placement and any explicit user preference. For a table
-  card, keep its title and actions in one header, with the action group on the right. Keep help
-  text only where it resolves a user decision or constraint; omit implementation explanations
-  and repeated descriptions of what a label already says.
+  card, keep its title and actions in one header, with the action group on the right. Add no
+  descriptive copy — subtitles, section descriptions, counter captions, help text — unless the
+  user asked for it on that surface ([SKILL.md](SKILL.md#3-style-it-to-the-design-system)).
 - User-requested deviations take precedence. Record deliberate differences narrowly; an
   exemption comment or successful lint run does not establish visual parity.
 
@@ -63,6 +63,7 @@ available. Verify the following for the affected controls, not every unrelated p
 
 - Typography, field heights, label gaps, table cells and action-header outer spacing match.
   Inspect a rendered control, not just its parent container.
+- No text renders that the user did not ask for beyond labels, headers, actions and states.
 - Open picklists and lookup results. Exercise keyboard selection, focus, dismissal, optional
   clearing, and relevant loading/empty/error states. A screenshot of a closed menu is insufficient.
 - Follow changed record links and check panel open/close, focus entry and return. Use authorized
