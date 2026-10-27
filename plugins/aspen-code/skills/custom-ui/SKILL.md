@@ -26,6 +26,15 @@ surface (a route, a layout section, a `custom_page` tab).
 - A `custom_page` tab names its page `ui_main_c.<route name>` (`metadata`'s `metadata-shapes.md`).
   A custom (`_c`) codefile serves at `/ui/c/<base-url-path-part>/<route path>`; `/ui/a/` is app
   scope, not yours.
+- **A native list or action that opens your page** (a related list's +, opening a record): keep
+  the native `related_list` section (`metadata`) and redirect the action with
+  `platform-route-overrides` in `aspen.client.json`. Each entry is `{"type": "object",
+  "object-name", "action": "create" | "edit" | "view", "target": {"route-name"}}`, naming a route in
+  `routing.routes`; `edit` and `view` add `"params": {"record-id": "<path param>"}`. It redirects
+  that action for the object everywhere, not from one list. The public `create` route carries no
+  parent record in 26.4.1: when the + must carry its parent, check on the instance, and if it
+  doesn't arrive, say that part is unmet rather than adding a picker silently. Say whether what
+  you delivered is native metadata or custom rendering.
 
 ## 2. What the page can reach
 
@@ -34,8 +43,9 @@ surface (a route, a layout section, a `custom_page` tab).
 - Navigate with `@aspen-crm/sdk/navigation`: `navigation.createHref(descriptor)` for an `href`,
   and on click `if (shouldInterceptLinkClick(event)) { event.preventDefault();
   navigation.navigate(descriptor) }`, so a modified or middle click still opens a new tab. Never
-  hand-build platform URLs. `navigate` to `/objects/:objectName/:recordId` needs
-  `config.tabName`, or the platform errors "No active tab found".
+  hand-build platform URLs. An object's list, `/objects/:objectName`, needs `config.tabName` (a
+  `tab_p` name), or its page errors "No active tab found"; a record,
+  `/objects/:objectName/:recordId`, takes no `config`.
 - Records come from the instance's query endpoints through `@aspen-crm/sdk/request`, under the AQL
   rules in `server-code`'s `query-notes.md`: every query needs a `LIMIT`; a JSON query takes
   `LIMIT` ≤ 1000 and `OFFSET` ≤ 10000 (larger is rejected, not capped). Page deterministically,
@@ -46,6 +56,13 @@ surface (a route, a layout section, a `custom_page` tab).
   item.label`), read from `POST /describe/picklist_p` (there is no `/metadata/<ctype>` route).
   Never derive a label from the name or keep a parallel label table. Keep labels for retired items
   still on records; if one can't be resolved, show the value and say the label is unavailable.
+- **A date field is a calendar day**, `YYYY-MM-DD`, not an instant: format it as a date, never
+  through `new Date(value)`, which reads it as UTC midnight and shows the day before west of UTC.
+- **An action that writes several records** (a header and its lines, a copy, a revision) is
+  several requests, and one that fails leaves the earlier ones written. Before the first write,
+  check the parent and the limits you know; give the records a stable key, so a retry finds what
+  exists and resumes instead of creating a second set; and show partial work as partial. When the
+  writes must land together, make it one server call (`server-code`).
 - **Currency:** `ccode_p.currency_code_p` returns a picklist name (`usd_p`), which
   `Intl.NumberFormat` rejects. Its label is the ISO code (`usd_p` → `USD`): resolve and validate
   that for the formatter. Never rewrite the stored value or silently format an unresolved currency
@@ -63,7 +80,9 @@ in [aspen-icons.ts](aspen-icons.ts) copied into `typescript/src/`. Never a nativ
 text glyph or emoji for an icon.
 
 A hook checks every write in `typescript/` against these rules. Its denial names the rule and the
-escape hatch (`aspen-token-exempt:` / `aspen-component-exempt:` with a reason); follow it.
+escape hatch (`aspen-token-exempt:` / `aspen-component-exempt:` with a reason); follow it. A file
+a shell script writes is checked only after the command runs, as context: fix what it names before
+moving on.
 
 **No descriptive copy unless asked.** A page, section, card, list, table or counter shows its title
 or label and its data, nothing that describes them: no subtitle, intro or summary paragraph,
@@ -81,8 +100,8 @@ node <this skill>/scripts/lint-ui-tokens.mjs typescript/src   # the hook's check
 
 The build also fails a stylesheet naming an `--ap-*` token the snapshot
 doesn't define ([Build check](ui-design-tokens.md#build-check)). Type errors show only in the
-editor or `tsc`. The lint script exits 1 on any finding; suggest wiring it into CI. Then deploy
-with `build-and-deploy`.
+editor or `tsc`. The lint script exits 1 on any finding; suggest wiring it into CI. Custom UI is
+done only when both pass. Then deploy with `build-and-deploy`.
 
 ## 5. Verify the rendered UI
 

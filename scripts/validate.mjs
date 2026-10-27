@@ -53,6 +53,15 @@ export function validatePlugin (root) {
   assert.match(serverCode, /Ask the developer how it fails/, 'server-code: the ask-before-writing error step is missing')
   assert.ok(serverCode.includes('error-handling.md'), 'server-code: must route to error-handling.md')
 
+  // Codex reads these skills too: a Claude Code tool name carries its Codex counterpart beside it.
+  for (const skill of skills) {
+    for (const file of readdirSync(join(root, 'skills', skill)).filter((f) => f.endsWith('.md'))) {
+      const body = readFileSync(join(root, 'skills', skill, file), 'utf8')
+      if (body.includes('AskUserQuestion')) assert.ok(body.includes('request_user_input'), `${skill}/${file}: names AskUserQuestion without Codex's request_user_input`)
+    }
+  }
+  assert.match(router, /^## In Codex$/m, 'using-aspen: the "In Codex" section is missing')
+
   const hooks = join(root, 'hooks/hooks.json')
   if (existsSync(hooks)) {
     for (const groups of Object.values(json(hooks).hooks)) for (const group of groups) for (const hook of group.hooks) {

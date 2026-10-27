@@ -16,7 +16,7 @@ The session-start note says what is missing. Without hooks, check:
 |---|---|---|
 | The CLI is installed | `aspen --version` (or `~/.aspen/bin/aspen --version`) | `getting-started` step 1 |
 | Signed in to the right instance | `aspen doctor` → `instance.logged-in`, `configuration.record-matches-login` | `getting-started` step 2 |
-| In that instance's directory | `.aspen/config.toml` here or above | `getting-started` step 3 |
+| In that instance's directory | `.aspen/config.toml` here or above | `getting-started` steps 3 and 6 |
 | Build dependencies installed | `aspen doctor` → `toolchain.*`, `typescript.deps-installed` | `getting-started` step 4 |
 
 Then run `aspen doctor` once in the instance directory (JSON under an agent, one `id` + `status`
@@ -45,7 +45,8 @@ Skip them when the tier is settled — a label, one picklist item, fixing what y
 turn — and go straight to `metadata`.
 
 Read-only subagents: `schema-explorer` answers a model-shape question across many objects;
-`metadata-reviewer` audits a non-trivial metadata diff before deploy.
+`metadata-reviewer` audits a non-trivial metadata diff before deploy (Codex: `spawn_agent` with the
+body of `agents/<name>.md` as its task).
 
 Worked examples: three sample instances with their metadata, triggers and data
 ([samples.md](samples.md)).
@@ -67,9 +68,11 @@ Worked examples: three sample instances with their metadata, triggers and data
   deployed file.
 - Deploying and the recovery verbs change a shared instance: get the human's go-ahead
   (`build-and-deploy`). "Deployed" is done only after a record round-trip proves the behavior.
-- **Ask only at the gates above** (credentials, a deploy or recovery verb, installing, a new
-  component). Anything reversible in the instance directory — a pin, a config file, a rebuild —
-  do it and say what you changed.
+- **Ask only at the gates above** (credentials, a deploy or recovery verb, installing, the first
+  new object or custom page in a placement table). Each is a `Required:` line in its skill: stop
+  there for the user's yes, unless they already gave it for that exact action. Anything
+  reversible in the instance directory — a pin, a config file, a rebuild — do it and say what you
+  changed.
 - **Ship what isn't blocked.** When one piece can't deploy, deploy the rest and name the one
   blocker, rather than holding the whole change.
 - **Test a cause before you act on it or send the human after it.** One compiler message or one
@@ -77,13 +80,30 @@ Worked examples: three sample instances with their metadata, triggers and data
   send someone to find a fix, run the cheapest check that could prove it wrong first: query the
   registry, or compile again changing one thing (`diagnose` step 3).
 - A platform fact a compile or check-in taught you that no skill states belongs in this plugin:
-  tell the human, and add a lesson to the instance repo (`diagnose`).
+  tell the human, and add a lesson to the instance's `LESSONS.md` (`diagnose`).
+
+## In Codex
+
+- A thread stays in the folder it started in. Build only in a thread whose folder is the
+  instance directory (`getting-started` step 6); elsewhere, `cd <dir> && …` every command and read
+  `<dir>/AGENTS.md` and `<dir>/LESSONS.md` first.
+- Edit files with `apply_patch`. A script that rewrites files (a heredoc, `python - <<'PY'`,
+  `sed -i`) skips the pre-write guards; the UI part is only caught after the fact.
+- A generator that emits metadata is reviewed like hand-written metadata (`metadata`).
+- Custom UI is done only when `lint-ui-tokens.mjs typescript/src` is clean and `aspen compile`
+  passes (`custom-ui` step 4).
+- Ask questions with `request_user_input`. A `Required:` line is a hard stop: quote it when you
+  pause, and don't proceed until the user answers.
+- Codex loads `AGENTS.md`, not `CLAUDE.md`: anything for both hosts goes in `AGENTS.md` or a
+  file it links.
 
 ## The directory and the reference
 
 The instance directory's `AGENTS.md` (written by `aspen init`, imported by `CLAUDE.md`) owns the
-layout. Author metadata only in `metadata/custom/` (`platform/`, `active/` and `compiled/` are
-replaced by the next fetch or compile), server code in `rust/`, UI in `typescript/`.
+layout. Lessons earlier sessions learned on this instance are in `LESSONS.md` beside it, linked
+from `AGENTS.md`; read it before building. Author metadata only in `metadata/custom/`
+(`platform/`, `active/` and `compiled/` are replaced by the next fetch or compile), server code in
+`rust/`, UI in `typescript/`.
 
 The Aspen docs are the reference for every component type, the CLI, the Rust SDK, AQL and the REST
 API, through the `aspen-docs` MCP server: `searchDocumentation`, then `getPage` on the URL it

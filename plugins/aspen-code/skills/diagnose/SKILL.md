@@ -52,8 +52,17 @@ Reproduce and find the cause before any fix, routing on what the CLI actually pr
 
 ## Lessons
 
-After resolving a non-obvious failure, add one line — `symptom → root cause → fix` — to a
-`## Lessons` section in the instance directory's `CLAUDE.md`, below its `@./AGENTS.md` import
-(`aspen init` never overwrites it). It is committed, so every teammate's agent inherits it.
-Deduplicate first and keep it under ~15 lines, pruning the least useful. A lesson true of the
-platform also belongs in this plugin: tell the human to raise it on `aspen-crm/aspen-code`.
+After resolving a non-obvious failure, add one line — `symptom → root cause → fix` — to
+`LESSONS.md` in the instance directory, never to `AGENTS.md` or `CLAUDE.md`:
+
+1. No `LESSONS.md` yet: create it with a `# Lessons` heading, and append one line to the end of
+   `AGENTS.md`: `Lessons from earlier sessions on this instance are in LESSONS.md; read it
+   before building.` (`aspen init` never overwrites either file.)
+2. A `## Lessons` section in `CLAUDE.md` from an older session: move its lines into `LESSONS.md`
+   and delete the section, leaving `CLAUDE.md` as its `@./AGENTS.md` import. Codex doesn't read
+   `CLAUDE.md`.
+
+It is committed, so every teammate's agent, on either host, inherits it. Deduplicate first and
+keep it under ~15 lines, pruning the least useful; name the CLI build a lesson was observed on. A
+lesson true of the platform also belongs in this plugin: tell the human to raise it on
+`aspen-crm/aspen-code`.

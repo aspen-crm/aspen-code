@@ -102,6 +102,23 @@ test('signed in, in a subdirectory of the matching instance directory: routes to
   assert.doesNotMatch(out, /refuse/)
 })
 
+test('signed in, in the folder above an instance directory: says to move the session there', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  const above = join(m.home, 'Aspen')
+  const out = context({ ...m, cwd: above })
+  assert.ok(out.includes(join(above, 'acme_dev')))
+  assert.match(out, /new session in its folder/)
+  assert.match(out, /Codex: a new thread with that folder as its project/)
+  assert.match(out, /cd <instance folder> && …/)
+})
+
+test('an instance directory with a LESSONS.md points at it', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  assert.doesNotMatch(context(m), /LESSONS\.md/)
+  writeFileSync(join(m.home, 'Aspen', 'acme_dev', 'LESSONS.md'), '# Lessons\n')
+  assert.match(context(m), /LESSONS\.md`: read it before building/)
+})
+
 test('signed in to a different instance than the directory: warns before any deploy', t => {
   const out = context(machine(t, { cli: true, onPath: true, login: URL_B, instanceDir: URL_A }))
   assert.match(out, /using-aspen/)

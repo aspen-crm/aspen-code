@@ -90,6 +90,19 @@ test('login runs only in the agent shape and never with an API key; logout asks'
   assert.match(m.run('aspen logout').confirm[0], /removes the stored login/)
 })
 
+test('aspen init outside ~/Aspen asks; ~/Aspen, a confirmed choice and a refresh pass', t => {
+  const m = machine(t)
+  const r = m.run('aspen init', m.scratch)
+  assert.equal(r.hard.length, 0)
+  assert.match(r.confirm[0], /not `.*Aspen`/)
+  assert.ok(r.confirm[0].includes(`aspen init --dir ${join(m.home, 'Aspen')}`))
+  assert.equal(m.run(`aspen init --dir "${m.scratch}"`, m.dev).confirm.length, 1)
+  for (const c of ['aspen init --dir ~/Aspen', `cd "${join(m.home, 'Aspen')}" && aspen init`, 'ASPEN_CODE_CONFIRMED=1 aspen init']) {
+    assert.deepEqual(m.run(c, m.scratch), { hard: [], confirm: [] }, c)
+  }
+  assert.deepEqual(m.run('aspen init'), { hard: [], confirm: [] }) // in an instance folder: a refresh
+})
+
 test('host adapters: Claude asks, Codex refuses with the confirm route; unrelated commands pass', t => {
   const m = machine(t, B)
   const cmd = `aspen move save-package --dir "${m.prod}"`

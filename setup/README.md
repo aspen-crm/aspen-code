@@ -165,13 +165,15 @@ No restart is needed. Tell the user:
    ```
 
 The plugin takes it from there:
-- **Creates the instance folder** with `aspen init`, asking where it should go.
+- **Creates the instance folder** with `aspen init`, in `~/Aspen` unless you name another place.
 - **Installs the build dependencies:** the Rust toolchain and crates, Node, and the npm packages,
   showing the plan and asking first.
 - **Checks everything** with `aspen doctor`.
 
-- **Moves the session** into the new instance folder (`<domain>_<instance>`). If that folder is
-  outside the one the session started in, open a new session there.
+- **Moves the session** into the new instance folder (`~/Aspen/<domain>_<instance>`). When the
+  session can't move, it asks you to open a new one there: in Claude Code, run `claude` from that
+  folder; in Codex, whose threads stay in the folder they started in, add the folder as a project
+  and start a new thread in it. Build only in that session.
 
 Then describe the change you want, e.g. *"Add
 a renewal date and an auto-renew flag to accounts, and show them on the account layout."*

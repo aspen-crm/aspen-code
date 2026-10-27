@@ -18,6 +18,15 @@ authoring the skipped model *and* rewriting whatever read the old shape.
 **Default to tier 1.** Tier 2 is for what a stored field can't maintain itself; tier 3 for what no
 layout can render. A page answering a tier-1 question looks right on screen and is wrong underneath.
 
+## A workflow: its journey first
+
+When the request is a workflow (people moving through several records or screens), write its
+journey in one line before the ladder: **actor → entry record → actions → context carried forward
+→ what is stored when it's done**. For example: seller → opportunity → configure, price, review →
+the opportunity and its quote → an approved quote with its lines. Navigation starts at the entry
+record; the objects behind the workflow stay behind it. Skip this for a single field, rule or
+screen.
+
 ## The ladder
 
 The first yes decides. People name the screen they imagine ("dashboard", "page"), not the tier.
@@ -47,12 +56,20 @@ Why the default holds:
 
 Write it before authoring and show the human, one row per thing the request asks for:
 
-| Thing | Tier | Component | Why not the tier above |
-|---|---|---|---|
+| Thing | Source | Tier | Component | Why not the tier above |
+|---|---|---|---|---|
 
+**Required:** when the table adds the first new object or the first custom page (tier 3), show it
+and wait for the user's yes before authoring. Metadata can't be deleted yet, and these two cost the
+most when the guess is wrong. Any other table: show it and carry on.
+
+- **Source** is where the row comes from: `source rule` (the request, or a document the user gave),
+  `integrity` (keeps records consistent), `proposed` (a rule you are adding) or `fixture` (sample
+  data or a test-only check). When you report, list `proposed` and `fixture` rows apart from the
+  rest; a `fixture` never ships as a product rule.
 - A tier-3 row needs a reason, or it isn't built.
-- A tier-2 row names the stored field it maintains; a trigger that stores nothing is a tier-3
-  answer.
+- A tier-2 row names the stored field it maintains or the save it rejects (row 4); a trigger that
+  does neither is a tier-3 answer.
 - Format and worked rows from real instances: [placement-table.md](placement-table.md). Three
   whole models placed this way, metadata and triggers: [samples.md](../using-aspen/samples.md).
 
