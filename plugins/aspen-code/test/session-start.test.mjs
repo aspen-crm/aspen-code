@@ -39,7 +39,7 @@ test('no CLI: routes to getting-started with the installer', t => {
   assert.match(out, /not installed/)
   assert.match(out, /getting-started/)
   assert.match(out, /installer\.(sh|ps1)/)
-  assert.match(out, /--no-modify-path|-NoModifyPath/) // the user edits their own profile
+  assert.match(out, /--no-modify-path|installer\.ps1 \| iex/) // macOS/Linux: the user edits their own profile
 })
 
 test('no CLI: the installer comes from the instance\'s environment', t => {

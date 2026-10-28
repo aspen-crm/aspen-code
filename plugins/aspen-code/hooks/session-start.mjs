@@ -62,7 +62,7 @@ export const loginCommand = (url) => isWindows
   : `ASPEN_INTERACTIVE=1 aspen login -i ${url} --agent no --credential-store keyring`
 
 const installCommand = (cdn) => isWindows
-  ? `irm ${cdn}/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\aspenup-installer.ps1" -NoModifyPath -Yes`
+  ? `irm ${cdn}/tooling/latest/cli/installer.ps1 | iex`
   : `curl --proto '=https' --tlsv1.2 -LsSf ${cdn}/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path`
 
 const nonBlank = (v) => (v && v.trim() ? v : null)
@@ -70,8 +70,8 @@ const isFile = (p) => { try { return statSync(p).isFile() } catch { return false
 const isDir = (p) => { try { return statSync(p).isDirectory() } catch { return false } }
 
 // Where the CLI is, or null. aspenup puts its `aspen` proxy in $ASPEN_HOME/bin (default
-// ~/.aspen/bin). The installer leaves PATH alone (--no-modify-path), so the proxy dir is checked
-// directly as well.
+// ~/.aspen/bin). On macOS/Linux the installer leaves PATH alone (--no-modify-path), and a session
+// started before the install has the old PATH either way, so the proxy dir is checked directly as well.
 export function findCli (env = process.env, home = homedir()) {
   const names = isWindows ? ['aspen.exe', 'aspen.cmd', 'aspen'] : ['aspen']
   const onPath = (env.PATH || env.Path || '').split(delimiter).filter(Boolean)

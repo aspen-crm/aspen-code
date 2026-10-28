@@ -101,7 +101,9 @@ Is it installed? Check with `aspen --version`, or by its full path `~/.aspen/bin
   their go-ahead re-run the installer below from `<cdn>`, which re-points it.
 
 **Not installed:** tell the user it downloads from `<cdn>` (filled in) and installs to `~/.aspen`.
-It leaves their shell profile alone. Then, with their go-ahead, run it with `<cdn>` filled in:
+On macOS/Linux it leaves their shell profile alone; on Windows it asks "Proceed?" and adds
+`~\.aspen\bin` to their PATH for new terminals. Then, with their go-ahead, run it with `<cdn>`
+filled in:
 
 macOS / Linux:
 
@@ -112,11 +114,12 @@ curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh
 Windows (PowerShell):
 
 ```powershell
-irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
+irm <cdn>/tooling/latest/cli/installer.ps1 | iex
 ```
 
-If the host refuses to run the installer, hand the user the command for their OS and ask them
-to run it in their own terminal. Then wait.
+If the host refuses to run the installer, or on Windows it says "'Proceed?' has no terminal to
+ask on", hand the user the command for their OS and ask them to run it in their own terminal. Then
+wait.
 
 **Check:** `~/.aspen/bin/aspen --version` prints a version. This session's PATH predates the
 install, so use the full path for the rest of this session. Don't suggest a PATH or shell-profile

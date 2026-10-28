@@ -37,12 +37,15 @@ curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh
 ```
 
 ```powershell
-irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
+irm <cdn>/tooling/latest/cli/installer.ps1 | iex
 ```
 
-`-y` answers the installer's own prompt (the user's consent to you is the confirmation);
-`--no-modify-path` leaves the shell profile alone. If the host blocks the command, don't work
-around it: give the user the command for their OS to run in a terminal and wait for them.
+On macOS/Linux, `-y` answers the installer's own prompt (the user's consent to you is the
+confirmation) and `--no-modify-path` leaves the shell profile alone. On Windows the installer asks
+"Proceed?" itself and adds `~\.aspen\bin` to the user's PATH for new terminals; with no terminal
+to ask on (most agent shells) it refuses: "'Proceed?' has no terminal to ask on". Then, or if the
+host blocks the command, don't work around it: give the user the command for their OS to run in a
+terminal and wait for them.
 
 **Check:** `~/.aspen/bin/aspen --version` (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
 This session's PATH predates the install, so use that full path for the rest of the session. Don't
