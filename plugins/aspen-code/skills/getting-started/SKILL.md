@@ -29,19 +29,23 @@ domain being the last two labels of the instance host (`https://abc.aspen-crm2.c
 custom-domain host, ask for their `static-assets.` host. An existing install whose `aspenup show`
 prints another `cdn:` can't serve this instance — tell the user and, with consent, reinstall.
 
-Say what it does (downloads from `<cdn>`, installs to `~/.aspen`) and **ask before running it**:
+Say what it does (downloads from `<cdn>`, installs to `~/.aspen`). **Required:** ask before
+running it:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf <cdn>/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path
 ```
 
 ```powershell
-irm <cdn>/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\aspenup-installer.ps1" -NoModifyPath -Yes
+irm <cdn>/tooling/latest/cli/installer.ps1 | iex
 ```
 
-`-y` answers the installer's own prompt (the user's consent to you is the confirmation);
-`--no-modify-path` leaves the shell profile alone. If the host blocks the command, don't work
-around it: give the user the command for their OS to run in a terminal and wait for them.
+On macOS/Linux, `-y` answers the installer's own prompt (the user's consent to you is the
+confirmation) and `--no-modify-path` leaves the shell profile alone. On Windows the installer asks
+"Proceed?" itself and adds `~\.aspen\bin` to the user's PATH for new terminals; with no terminal
+to ask on (most agent shells) it refuses: "'Proceed?' has no terminal to ask on". Then, or if the
+host blocks the command, don't work around it: give the user the command for their OS to run in a
+terminal and wait for them.
 
 **Check:** `~/.aspen/bin/aspen --version` (Windows: `& "$HOME\.aspen\bin\aspen.exe" --version`).
 This session's PATH predates the install, so use that full path for the rest of the session. Don't
@@ -82,13 +86,17 @@ of `~/.config/aspen/credentials.json` (Windows: `%APPDATA%\aspen\credentials.jso
 ## 3. Create the instance directory — `aspen init`
 
 It needs the login and creates a folder named after the instance **under** the directory you give
-it. Ask where (e.g. `~/Aspen`), then `aspen init --dir ~/Aspen`, which creates
-`~/Aspen/<domain>_<instance>` — `<dir>` below. It refuses only when that folder already holds files
-and no `.aspen/config.toml`, and never overwrites a file you authored; run again from inside an
-instance directory, it completes a fresh clone or refreshes `platform/` and `active/`. The layout
-is in the *Aspen CLI Developer Guide* (`aspen-docs`). Stay where you are until step 6.
+it. Always `aspen init --dir ~/Aspen` (Windows: `$HOME\Aspen`), which creates
+`~/Aspen/<domain>_<instance>` — `<dir>` below — unless the user names another parent folder. Never
+let it default to the folder this session started in: an instance buried in an unrelated project
+is one the next session can't find. A guard hook asks before any other location.
 
-**Check:** `.aspen/config.toml` names the instance you signed in to.
+It refuses only when that folder already holds files and no `.aspen/config.toml`, and never
+overwrites a file you authored; run again from inside an instance directory, it completes a fresh
+clone or refreshes `platform/` and `active/`. The layout is in the *Aspen CLI Developer Guide*
+(`aspen-docs`). Stay where you are until step 6.
+
+**Check:** `<dir>/.aspen/config.toml` exists and names the instance you signed in to.
 
 ## 4. Install the project's dependencies
 
@@ -133,12 +141,21 @@ dependency check: re-run the script, which does only what is missing. Stop and t
 - `configuration.record-matches-login` — signed in to another instance; back to step 2 with this
   directory's URL.
 
-## 6. Move into the new directory
+## 6. Move the session into the new directory
 
-Only when step 3 created one: `cd <dir>`, tell the user the session is there, and suggest
-`git init` and a first commit. **Check:** `pwd` in a separate command prints `<dir>`. If not, the
-host keeps the session where it started (Claude Code does when `<dir>` is outside it): ask the user
-to reopen the host in `<dir>` before building.
+The session has to run **in** `<dir>`: that is where the host loads its `AGENTS.md`, and where the
+hooks know which instance the session builds.
+
+- **Claude Code:** `cd <dir>`. **Check:** `pwd` in a separate command prints `<dir>`. If not, the
+  host kept the session where it started (it does when `<dir>` is outside it).
+- **Codex:** a thread stays in the folder it started in, so this one can't move.
+
+When the session can't move — **Required:** stop here and ask the user to start a new session in
+`<dir>` (Claude Code: `claude` from that folder; Codex: add `<dir>` as a project and start a new
+thread in it), then send the first prompt there. Don't build in this one; until the user switches,
+run each `aspen` command as `cd <dir> && …`.
+
+Suggest `git init` and a first commit in `<dir>`.
 
 Then `using-aspen`. Components created while testing can't be deleted yet: on a shared instance,
 keep them few and clearly named.

@@ -39,7 +39,7 @@ test('no CLI: routes to getting-started with the installer', t => {
   assert.match(out, /not installed/)
   assert.match(out, /getting-started/)
   assert.match(out, /installer\.(sh|ps1)/)
-  assert.match(out, /--no-modify-path|-NoModifyPath/) // the user edits their own profile
+  assert.match(out, /--no-modify-path|installer\.ps1 \| iex/) // macOS/Linux: the user edits their own profile
 })
 
 test('no CLI: the installer comes from the instance\'s environment', t => {
@@ -100,6 +100,23 @@ test('signed in, in a subdirectory of the matching instance directory: routes to
   const out = context(machine(t, { cli: true, onPath: true, login: URL_A.replace(/\/$/, ''), instanceDir: URL_A }))
   assert.match(out, /using-aspen/)
   assert.doesNotMatch(out, /refuse/)
+})
+
+test('signed in, in the folder above an instance directory: says to move the session there', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  const above = join(m.home, 'Aspen')
+  const out = context({ ...m, cwd: above })
+  assert.ok(out.includes(join(above, 'acme_dev')))
+  assert.match(out, /new session in its folder/)
+  assert.match(out, /Codex: a new thread with that folder as its project/)
+  assert.match(out, /cd <instance folder> && …/)
+})
+
+test('an instance directory with a LESSONS.md points at it', t => {
+  const m = machine(t, { cli: true, onPath: true, login: URL_A, instanceDir: URL_A })
+  assert.doesNotMatch(context(m), /LESSONS\.md/)
+  writeFileSync(join(m.home, 'Aspen', 'acme_dev', 'LESSONS.md'), '# Lessons\n')
+  assert.match(context(m), /LESSONS\.md`: read it before building/)
 })
 
 test('signed in to a different instance than the directory: warns before any deploy', t => {

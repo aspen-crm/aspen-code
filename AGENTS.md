@@ -24,12 +24,18 @@ The Claude Code + Codex plugin for the aspenup `aspen` CLI. Skills and two read-
   use it. Keep bodies procedures, not essays.
 - **Agents are read-only** — never give `schema-explorer` or `metadata-reviewer` Write/Edit.
 - **Hooks stay offline, read-only and fail open**: they never run the CLI (the aspenup proxy can
-  reach the network), never read a secret, and exit 0 with no output on any error. There are three:
-  `session-start.mjs` (readiness note), `guard-instance.mjs` (right binary, folder and instance
-  for every `aspen` command) and `guard-ui.mjs` (design tokens, native controls and glyph icons on
-  every write in `typescript/`, and a question when a write first declares a page, layout
-  section or `custom_page` tab). Anything
-  else the plugin enforces lives in skill prose.
+  reach the network), never read a secret, and exit 0 with no output on any error. There are four:
+  `session-start.mjs` (readiness note, the move into an instance folder, its `LESSONS.md`),
+  `guard-instance.mjs` (right binary, folder and instance for every `aspen` command, and
+  `aspen init` only under `~/Aspen` without a confirm), `guard-ui.mjs` (design tokens, native
+  controls and glyph icons on every write in `typescript/`, and a question when a write first
+  declares a page, layout section or `custom_page` tab) and `guard-ui-shell.mjs` (the same checks
+  after a shell command, which goes around `guard-ui.mjs`). Anything else the plugin enforces
+  lives in skill prose.
+- **Write for both hosts.** Codex reads these skills, the instance's `AGENTS.md` (not
+  `CLAUDE.md`) and the hooks. A Claude Code tool name carries its Codex counterpart; an approval
+  gate is one `Required:` line, which Codex treats as a hard stop; Codex specifics go in
+  `using-aspen`'s "In Codex" section.
 - **Installing is consented, planned and idempotent.** `install-deps.mjs` prints its plan by
   default, installs project dependencies only with `--run` and machine-wide tools only with
   `--machine`, and skips anything already satisfied. Keep new install steps to that shape.

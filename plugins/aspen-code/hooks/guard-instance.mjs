@@ -14,8 +14,10 @@
 //      sign in again, in the shape `getting-started` step 2 gives.
 //   4. `aspen login` in any other shape. With an API key it hands the model a secret; without the
 //      overrides the CLI refuses OAuth under an agent and suggests that API key.
+//   5. A new instance folder outside `~/Aspen`. `aspen init` creates `<dir>/<domain>_<instance>`
+//      wherever it runs, so an agent started in some other folder buries the instance there.
 //
-// 1, 3 and 4 are refused outright. 2 (and `aspen logout`) asks: Claude Code prompts; Codex, whose
+// 1, 3 and 4 are refused outright. 2, 5 and `aspen logout` ask: Claude Code prompts; Codex, whose
 // hooks cannot prompt, refuses with a note to ask the user and re-run with ASPEN_CODE_CONFIRMED=1.
 //
 // Stateless, offline and read-only: it reads `.aspen/config.toml` files and the `instance` field
@@ -119,6 +121,16 @@ export function decide ({ command, cwd, env = process.env, home = homedir() }) {
     }
     if (inv.command === 'logout' && !inv.confirmed) {
       confirm.push(`\`aspen logout\` removes the stored login for \`${login ?? 'the current instance'}\`; the user has to sign in again afterwards. Only with their go-ahead.`)
+      continue
+    }
+
+    // 5. A new instance folder anywhere but ~/Aspen (a re-run inside an instance folder refreshes it).
+    if (inv.command === 'init' && !target && !inv.confirmed) {
+      const aspenRoot = join(home, 'Aspen')
+      const fold = (p) => (process.platform === 'win32' || process.platform === 'darwin' ? real(p).toLowerCase() : real(p))
+      if (fold(inv.dir) !== fold(aspenRoot)) {
+        confirm.push(`\`aspen init\` would create this instance's folder under \`${inv.dir}\`, not \`${aspenRoot}\`. Instance folders live in \`${aspenRoot}\` unless the user chose another place: run \`aspen init --dir ${aspenRoot}\`, or run this only if the user picked \`${inv.dir}\`.`)
+      }
       continue
     }
 

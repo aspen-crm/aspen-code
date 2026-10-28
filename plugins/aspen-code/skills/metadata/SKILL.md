@@ -38,6 +38,10 @@ Not routed here from `using-aspen`? Read its "Where the docs are wrong" table fi
      appears only in `custom/`; the extended platform objects in `metadata/active/object_p/` are
      real examples. Leave out identifying attributes such as a layout's `object` ("is locked and
      cannot be extended").
+   - **Written by a script you wrote** (a generator emitting many files): review its output as
+     if you wrote each file. Each new object passes `lean-data-model`; a child reachable from its
+     parent's layout gets no tab; `metadata-reviewer` reads the diff before deploy. Fix the
+     generator and run it again, never its output.
    - **An overlay's children** (a layout's `sections`, an object's `fields`): list only your new
      `_c` children, plus `{"extends": "<platform child>", …changes}` for a platform child you
      change. Platform children merge in by themselves. Some child attributes are locked, such as

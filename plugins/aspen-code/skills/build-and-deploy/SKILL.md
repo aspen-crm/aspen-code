@@ -32,9 +32,10 @@ that looks fine and changed nothing.
 - A set of related changes: `metadata-reviewer` on the diff first.
 - **Config vars:** if `./config_vars.json` exists, `save-package` uploads it after the save, and
   the upload clears every var the file doesn't list. Confirm it is complete, or shouldn't be there.
-- **Ask the human**, naming the instance (`.aspen/config.toml`), the components going out, and
-  whether code is included. It changes a shared instance, and the components it creates can't be
-  deleted yet.
+- **Required:** ask the human, naming the instance (`.aspen/config.toml`), the components going
+  out and whether code is included, and wait for a yes. It changes a shared instance, and the
+  components it creates can't be deleted yet. A user who already said to deploy this change has
+  given it; a different package needs its own.
 
 ## 3. The check-in chain — ordered, each phase mandatory
 
@@ -57,8 +58,8 @@ What each phase does is in the *Aspen CLI Developer Guide* (`aspen-docs`).
 ## 4. Recovery — ask first
 
 A failed prep leaves a package in flight that blocks the next `save-package` ("Operation Save is
-not allowed"). These verbs reach work every builder on the instance has staged, so get go-ahead for
-the exact verb and say its scope:
+not allowed"). These verbs reach work every builder on the instance has staged. **Required:** get
+the go-ahead for the exact verb, saying its scope:
 
 1. `aspen move clear-package` — drops the pending package from the dev set. Usually enough.
 2. Only when the instance says to ("invoke the checkin-clear action"): `aspen move checkin-clear` —
@@ -76,4 +77,10 @@ A green `checkin-deploy` proves the package was accepted, not that it works.
    one clearly-named record with them in the Aspen UI, and read it back.
 3. Assert the behavior: the derived field holds the right value; the invalid save is rejected with
    your message; the new layout, list view and tab are reachable from the nav.
-4. Only then say "deployed and verified"; otherwise say what is unverified.
+4. Size the proof to the change. A label: compile and look at it. A rule or derived value: one
+   valid and one rejected write, read back. A multi-record action: also an interrupted run and
+   its retry. A custom page or route override: start at the native entry point (the list, the +,
+   the record) and finish the user's task.
+5. Report four lists: implemented, verified (and how), partial, unverified. Say "deployed and
+   verified" only when the last two are empty, and name sample records and test-only checks as
+   such.

@@ -24,8 +24,11 @@
 //
 // Missing CLI or missing login: say so, and route to `getting-started`, in every session --
 // that is the onboarding prompt. Logged in to a different instance than the directory's: say
-// so, because every `aspen move` would refuse. In an instance directory: route to `using-aspen`.
-// Otherwise: silent, so an unrelated repo never hears about Aspen.
+// so, because every `aspen move` would refuse. In an instance directory: route to `using-aspen`,
+// and point at its `LESSONS.md`, which no host loads by itself. In the folder just above one
+// (`~/Aspen` after `aspen init`): say the session has to move there, since neither host loads
+// that folder's `AGENTS.md` from here. Otherwise: silent, so an unrelated repo never hears
+// about Aspen.
 //
 // Offline and read-only by design. It never runs the CLI (the aspenup proxy can reach the
 // network to resolve a toolchain) and never validates the token -- `aspen doctor` does that,
@@ -59,7 +62,7 @@ export const loginCommand = (url) => isWindows
   : `ASPEN_INTERACTIVE=1 aspen login -i ${url} --agent no --credential-store keyring`
 
 const installCommand = (cdn) => isWindows
-  ? `irm ${cdn}/tooling/latest/cli/installer.ps1 -OutFile "$env:TEMP\\aspenup-installer.ps1"; powershell -ExecutionPolicy Bypass -File "$env:TEMP\\aspenup-installer.ps1" -NoModifyPath -Yes`
+  ? `irm ${cdn}/tooling/latest/cli/installer.ps1 | iex`
   : `curl --proto '=https' --tlsv1.2 -LsSf ${cdn}/tooling/latest/cli/installer.sh | sh -s -- -y --no-modify-path`
 
 const nonBlank = (v) => (v && v.trim() ? v : null)
@@ -67,8 +70,8 @@ const isFile = (p) => { try { return statSync(p).isFile() } catch { return false
 const isDir = (p) => { try { return statSync(p).isDirectory() } catch { return false } }
 
 // Where the CLI is, or null. aspenup puts its `aspen` proxy in $ASPEN_HOME/bin (default
-// ~/.aspen/bin). The installer leaves PATH alone (--no-modify-path), so the proxy dir is checked
-// directly as well.
+// ~/.aspen/bin). On macOS/Linux the installer leaves PATH alone (--no-modify-path), and a session
+// started before the install has the old PATH either way, so the proxy dir is checked directly as well.
 export function findCli (env = process.env, home = homedir()) {
   const names = isWindows ? ['aspen.exe', 'aspen.cmd', 'aspen'] : ['aspen']
   const onPath = (env.PATH || env.Path || '').split(delimiter).filter(Boolean)
@@ -114,6 +117,15 @@ export function instanceDir (cwd) {
     if (up === dir) return null
     dir = up
   }
+}
+
+// Instance directories directly inside `cwd` — where `aspen init --dir <cwd>` puts one.
+export function childInstanceDirs (cwd) {
+  let entries = []
+  try { entries = readdirSync(cwd, { withFileTypes: true }) } catch { return [] }
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && isFile(join(cwd, e.name, '.aspen', 'config.toml')))
+    .map((e) => join(cwd, e.name))
 }
 
 // What this instance directory still needs installed before it builds — read from disk only:
@@ -205,9 +217,22 @@ export function context ({ cwd = process.cwd(), env = process.env, home = homedi
     return lines.join('\n')
   }
 
-  if (!here) return lines.join('\n')
+  if (!here) {
+    const below = childInstanceDirs(cwd)
+    if (below.length) {
+      const named = below.map((d) => `\`${d}\``).join(', ')
+      lines.push(
+        `This session is in \`${cwd}\`, the folder above the Aspen instance folder${below.length > 1 ? 's' : ''} ${named}. That folder's \`AGENTS.md\` and \`LESSONS.md\` are not loaded from here.`,
+        `Before any change to an instance, ask the user to start a new session in its folder (Claude Code: \`claude\` from that folder; Codex: a new thread with that folder as its project), and invoke the \`using-aspen\` skill there. Until then, read its \`AGENTS.md\` first and run each \`aspen\` command as \`cd <instance folder> && …\`.`
+      )
+    }
+    return lines.join('\n')
+  }
 
   lines.push(`You are in the Aspen instance directory \`${here.dir}\`. For any change to this instance, invoke the \`using-aspen\` skill first.`)
+  if (isFile(join(here.dir, 'LESSONS.md'))) {
+    lines.push(`This instance keeps lessons from earlier sessions in \`${join(here.dir, 'LESSONS.md')}\`: read it before building.`)
+  }
   lines.push(update(true))
   const served = here.instance && pinned?.release ? servedRelease(here.instance, env, home) : null
   if (served && served !== pinned.release) {

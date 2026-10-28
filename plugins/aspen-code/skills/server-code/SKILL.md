@@ -48,7 +48,8 @@ default `bail!`. Read [error-handling.md](error-handling.md) first: it has what 
 produces, including that the error `code` never reaches an API caller.
 
 List every failure the trigger can detect (each rule, each write or query it makes), then ask —
-with the host's question tool if it has one (Claude Code: AskUserQuestion), otherwise in chat —
+with the host's question tool if it has one (Claude Code: AskUserQuestion; Codex:
+request_user_input), otherwise in chat —
 and wait:
 
 1. **Presentation**, per condition: a *field error* (on that field; the API item carries the field

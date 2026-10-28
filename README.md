@@ -85,7 +85,13 @@ their menus and calendars), and a text glyph or emoji standing in for an icon; e
 documented exemption comment. `custom-ui` carries the anatomy of Aspen's select, lookup and date
 controls and the icons they draw. It asks once when a write first
 declares a page, layout section or `custom_page` tab. `custom-ui`'s `lint-ui-tokens.mjs` runs the
-same checks over a tree for CI.
+same checks over a tree for CI. A file a shell command writes (a heredoc, a script, `sed -i`) goes
+around the pre-write check, so after each shell command a second hook runs the same checks over
+the UI files it changed and hands the findings back to fix.
+
+**Instance folder:** `aspen init` outside `~/Aspen` asks first. A session that starts in the
+folder just above an instance folder is told to move into it, and one inside it is pointed at its
+`LESSONS.md`.
 
 Not in 0.0.15: the remaining guard hooks.
 
@@ -104,8 +110,9 @@ or you will have two sets of Aspen skills:
 No git? Claude Code can add `https://raw.githubusercontent.com/aspen-crm/aspen-code/main/setup/marketplace.json`
 instead, which installs the latest release zip; [setup/README.md](setup/README.md) covers Codex.
 
-Then start a **new** session. In Codex, review and trust the plugin's hook (plugin install does
-not trust hooks); without it the skills still work, and the model checks the CLI itself.
+Then start a **new** session. In Codex, review and trust the plugin's hooks (plugin install does
+not trust hooks, and an update with a new hook asks again); without them the skills still work,
+and the model checks the CLI itself.
 
 Try: *"Set me up to build on my Aspen instance."*
 

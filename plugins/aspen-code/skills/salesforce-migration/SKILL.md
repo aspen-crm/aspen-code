@@ -80,7 +80,8 @@ and only for a use the user names: then `lean-data-model` → `model-first` → 
 
 ### Step 5: one decision round per object
 
-From `reports/gaps.md`, one message per object (an `AskUserQuestion` round where it fits) with
+From `reports/gaps.md`, one message per object (a question-tool round where it fits: Claude
+Code `AskUserQuestion`, Codex `request_user_input`) with
 only what needs the user:
 
 - **Needs your decision**: every todo, each with your proposal already filled in. A picklist

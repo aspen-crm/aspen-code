@@ -3,10 +3,14 @@
 The artifact `model-first` produces. One row per thing the request asks for, written before the
 first file and shown to the human.
 
-| Thing | Tier | Component | Why not the tier above |
-|---|---|---|---|
+| Thing | Source | Tier | Component | Why not the tier above |
+|---|---|---|---|---|
 
 - **Thing** — in the requester's words, not yours. "Remaining budget", not `remaining_c`.
+- **Source** — `source rule`, `integrity`, `proposed` or `fixture` (`model-first`). A five-user
+  sample quote that fails a ten-user minimum is a `fixture`; the minimum itself is the
+  `source rule`; requiring a second approver nobody asked for is `proposed`. The worked rows below
+  are all `source rule`, so they leave it out.
 - **Tier** — 1 metadata, 2 Rust trigger, 3 TypeScript page or layout section.
 - **Component** — the actual name you will author: `engagement_c.remaining_c`, `budget_calc_c`,
   `budget_page_c`. Not "a field".
